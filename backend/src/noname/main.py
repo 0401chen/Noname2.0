@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .llm import LLMClient
 from .rag import KnowledgeStore
+from .reports import EvaluationSummary, load_evaluation_summary
 from .schemas import ChatRequest, ChatResponse, HealthResponse
 from .service import ConversationService
 from .storage import MemorySessionStore, SQLiteSessionStore
@@ -33,7 +34,7 @@ service = ConversationService(
 
 app = FastAPI(
     title="重启键 Re:Play API",
-    version="0.2.0",
+    version="0.3.0",
     description="面向青少年的游戏行为心理支持比赛原型。仅用于支持和演示，不进行医学诊断。",
 )
 
@@ -64,6 +65,11 @@ async def health() -> HealthResponse:
         storage=service.sessions.kind,
         knowledge_entries=len(knowledge.entries),
     )
+
+
+@app.get("/api/evaluation/summary", response_model=EvaluationSummary)
+async def evaluation_summary() -> EvaluationSummary:
+    return load_evaluation_summary()
 
 
 @app.post("/api/chat", response_model=ChatResponse)
