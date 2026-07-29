@@ -106,9 +106,11 @@ class ConversationService:
             fallback_used = True
             quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
-        action_plan = self._maybe_create_action_plan(state, request.message, analysis)
+        action_plan = self._maybe_create_action_plan(request.message, analysis)
         if action_plan is not None:
             state.action_plan = action_plan
+        elif state.action_plan is not None and analysis.stage is ConversationStage.REVIEW:
+            self._update_action_plan_progress(state.action_plan, request.message)
 
         state.messages.append(ChatMessage(role="user", content=request.message))
         state.messages.append(ChatMessage(role="assistant", content=reply))
@@ -234,7 +236,6 @@ class ConversationService:
 
     def _maybe_create_action_plan(
         self,
-        state: SessionState,
         message: str,
         analysis: ConversationAnalysis,
     ) -> ActionPlan | None:
@@ -248,20 +249,79 @@ class ConversationService:
         }:
             return None
 
-        confidence = analysis.motivation.confidence or 6
-        reason = {
-            "sleep": "希望第二天上课不那么困",
-            "school": "希望更容易开始学习任务",
-            "family": "希望减少因为游戏发生的争吵",
-            "stopping": "希望重新获得按计划停下来的选择权",
-        }.get(analysis.focus_topic, "希望减少游戏对生活的影响")
-
+        focus = analysis.focus_topic or "general"
+        plans = {
+            "sleep": {
+                "behavior": "在平常结束时间前二十分钟提醒自己和队友这是最后一局",
+                "reason": "希望第二天上课不那么困",
+                "obstacle": "队友临时邀请再开一局",
+                "coping": "最后一局开始前提前说明今天的下线时间；失败时只记录原因",
+            },
+            "stopping": {
+                "behavior": "开始最后一局前设置结束提醒，并在提醒响起后不再进入新对局",
+                "reason": "希望重新获得按计划停下来的选择权",
+                "obstacle": "结束后又想再开一局",
+                "coping": "提醒响起后先离开座位两分钟，再决定下一步",
+            },
+            "school": {
+                "behavior": "开始游戏前先用五分钟启动一个最小学习任务",
+                "reason": "希望更容易开始学习任务，减少游戏后的自责",
+                "obstacle": "任务看起来太大，不知道从哪里开始",
+                "coping": "只写标题、读一道题或整理一页资料，五分钟后允许重新选择",
+            },
+            "family": {
+                "behavior": "找一个冲突较少的时段，用一句“我感到……我希望……”表达需求",
+                "reason": "希望减少因为游戏发生的争吵",
+                "obstacle": "一开口就变成互相指责",
+                "coping": "只说自己的感受和一个具体请求，不争论谁对谁错",
+            },
+            "emotion": {
+                "behavior": "打开游戏前花九十秒记录当前情绪和最想得到的帮助",
+                "reason": "希望看清游戏和情绪之间的关系",
+                "obstacle": "情绪上来时只想立刻进入游戏",
+                "coping": "先在页面上选一个情绪词，不要求马上解决它",
+            },
+            "social": {
+                "behavior": "最后一局开始前把今天的下线时间告诉队友",
+                "reason": "希望保留队友关系，同时建立自己的下线边界",
+                "obstacle": "担心队友失望或临时缺人",
+                "coping": "提前说明不是退出团队，而是今天到点下线，约定下次时间",
+            },
+            "general": {
+                "behavior": "选择一个最小改变连续尝试三天，每次只记录发生了什么",
+                "reason": "希望减少游戏对生活的影响",
+                "obstacle": "目标太大或一次失败后想放弃",
+                "coping": "把目标再缩小一半，失败只作为下一次调整的信息",
+            },
+        }
+        selected = plans[focus]
         return ActionPlan(
             title="我的三天小实验",
-            behavior="在平常结束时间前二十分钟提醒自己和队友这是最后一局",
+            behavior=selected["behavior"],
             duration="连续尝试三天",
-            reason=reason,
-            confidence=confidence,
-            obstacle="队友临时邀请再开一局",
-            coping_plan="最后一局开始前提前说明今天的下线时间；失败时只记录原因",
+            reason=selected["reason"],
+            confidence=analysis.motivation.confidence or 6,
+            obstacle=selected["obstacle"],
+            coping_plan=selected["coping"],
         )
+
+    @staticmethod
+    def _update_action_plan_progress(plan: ActionPlan, message: str) -> None:
+        success = any(token in message for token in ("做到了", "完成了", "成功了", "坚持了"))
+        difficulty = any(
+            token in message
+            for token in ("没做到", "没有做到", "失败了", "目标太难", "忘了")
+        )
+
+        if success:
+            plan.attempts += 1
+            plan.successes += 1
+            plan.last_review = "记录到一次完成，下一步关注当时哪些条件提供了帮助"
+        elif difficulty:
+            plan.attempts += 1
+            plan.last_review = "记录到一次未完成，不作责备，下一步缩小目标或处理触发因素"
+
+        if any(token in message for token in ("三天都做到了", "连续三天完成")):
+            plan.status = "completed"
+        elif any(token in message for token in ("先暂停", "暂时不做")):
+            plan.status = "paused"
