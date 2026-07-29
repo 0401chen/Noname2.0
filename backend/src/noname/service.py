@@ -11,6 +11,7 @@ from .rag import KnowledgeStore
 from .routing import (
     classify_interaction,
     direct_route_reply,
+    generate_general_chat_reply,
     is_repetitive_reply,
     repair_repetitive_reply,
     route_analysis,
@@ -27,6 +28,7 @@ from .schemas import (
     InteractionRoute,
     KnowledgeHit,
     ReviewerTrace,
+    RiskAssessment,
     RiskLevel,
     SessionState,
 )
@@ -67,7 +69,7 @@ class ConversationService:
         route = classify_interaction(request.message, state)
 
         if rule_risk.level is not RiskLevel.HIGH and route is not InteractionRoute.SUPPORT:
-            return self._handle_direct_route(
+            return await self._handle_direct_route(
                 request=request,
                 state=state,
                 route=route,
@@ -191,22 +193,32 @@ class ConversationService:
             trace=trace,
         )
 
-    def _handle_direct_route(
+    async def _handle_direct_route(
         self,
         *,
         request: ChatRequest,
         state: SessionState,
         route: InteractionRoute,
         started_at: float,
-        rule_risk,
+        rule_risk: RiskAssessment,
     ) -> ChatResponse:
         analysis = route_analysis(route, rule_risk)
-        generated = direct_route_reply(route, request.message, state)
-        quality_flags = review_reply(generated.reply, analysis)
+        used_llm = False
+        if route is InteractionRoute.GENERAL_CHAT:
+            generated, used_llm = await generate_general_chat_reply(self.llm, request.message)
+        else:
+            generated = direct_route_reply(route, request.message, state)
 
+        quality_flags = review_reply(generated.reply, analysis)
         if is_repetitive_reply(state, generated.reply):
             generated = repair_repetitive_reply(route, request.message, analysis)
+            used_llm = False
             quality_flags = [*quality_flags, "repeated_generation_replaced"]
+
+        if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
+            generated = direct_route_reply(route, request.message, state)
+            used_llm = False
+            quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
         self._append_messages(state, request.message, generated.reply)
         if should_replace_saved_analysis(route):
@@ -220,7 +232,7 @@ class ConversationService:
             analysis=analysis,
             knowledge_hits=[],
             quality_flags=quality_flags,
-            fallback_used=False,
+            fallback_used=not used_llm,
             processing_ms=processing_ms,
         )
         return ChatResponse(
