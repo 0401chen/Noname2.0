@@ -6,6 +6,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .demo import DemoScenarioList, list_demo_scenarios
+from .diagnostics import DiagnosticsResponse, build_diagnostics
 from .llm import LLMClient
 from .rag import KnowledgeStore
 from .reports import EvaluationSummary, load_evaluation_summary
@@ -18,12 +20,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+APP_VERSION = "0.4.0"
 settings = get_settings()
 knowledge = KnowledgeStore()
+store_options = {
+    "retention_hours": settings.session_retention_hours,
+    "cleanup_interval_seconds": settings.session_cleanup_interval_seconds,
+}
 sessions = (
-    SQLiteSessionStore(settings.session_database_path)
+    SQLiteSessionStore(settings.session_database_path, **store_options)
     if settings.use_sqlite_sessions
-    else MemorySessionStore()
+    else MemorySessionStore(**store_options)
 )
 service = ConversationService(
     llm=LLMClient(settings),
@@ -34,7 +41,7 @@ service = ConversationService(
 
 app = FastAPI(
     title="重启键 Re:Play API",
-    version="0.3.0",
+    version=APP_VERSION,
     description="面向青少年的游戏行为心理支持比赛原型。仅用于支持和演示，不进行医学诊断。",
 )
 
@@ -52,6 +59,7 @@ async def root() -> dict[str, str]:
     return {
         "name": "重启键 Re:Play",
         "tagline": "不是逼你离开游戏，而是帮你重新拿回选择权。",
+        "version": APP_VERSION,
         "docs": "/docs",
     }
 
@@ -65,6 +73,22 @@ async def health() -> HealthResponse:
         storage=service.sessions.kind,
         knowledge_entries=len(knowledge.entries),
     )
+
+
+@app.get("/api/diagnostics", response_model=DiagnosticsResponse)
+async def diagnostics() -> DiagnosticsResponse:
+    return build_diagnostics(
+        settings=settings,
+        storage_kind=service.sessions.kind,
+        knowledge_entries=len(knowledge.entries),
+        evaluation=load_evaluation_summary(),
+        version=APP_VERSION,
+    )
+
+
+@app.get("/api/demo/scenarios", response_model=DemoScenarioList)
+async def demo_scenarios() -> DemoScenarioList:
+    return list_demo_scenarios()
 
 
 @app.get("/api/evaluation/summary", response_model=EvaluationSummary)
