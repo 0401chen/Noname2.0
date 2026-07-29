@@ -69,6 +69,10 @@ class ActionPlan(BaseModel):
     confidence: int = Field(ge=0, le=10)
     obstacle: str | None = None
     coping_plan: str | None = None
+    attempts: int = Field(default=0, ge=0)
+    successes: int = Field(default=0, ge=0)
+    status: Literal["active", "completed", "paused"] = "active"
+    last_review: str | None = None
 
 
 class ConversationAnalysis(BaseModel):
