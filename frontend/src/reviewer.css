@@ -1,0 +1,18 @@
+.reviewer-card .trace-stack + .trace-stack {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px dashed #ccddd3;
+}
+
+.knowledge-list small {
+  display: block;
+  margin: 6px 0 7px;
+  color: #7a8981;
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.reviewer-card .empty-copy {
+  margin-top: 10px;
+}
