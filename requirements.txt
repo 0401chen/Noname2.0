@@ -1,0 +1,4 @@
+# Install the Re:Play backend package and runtime dependencies.
+# Run from the repository root:
+#   python -m pip install -r requirements.txt
+-e ./backend
