@@ -1,5 +1,8 @@
 FROM node:22-alpine AS build
 
+ARG VITE_AGENT_NAME=Noname助手
+ENV VITE_AGENT_NAME=${VITE_AGENT_NAME}
+
 WORKDIR /app
 COPY frontend/package.json /app/package.json
 RUN npm install
