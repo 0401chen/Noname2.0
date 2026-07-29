@@ -3,6 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    REPLAY_PROJECT_ROOT=/app \
     SESSION_STORAGE=memory \
     SESSION_DATABASE_PATH=/app/runtime/replay.sqlite3
 
