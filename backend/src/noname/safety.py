@@ -28,7 +28,10 @@ HIGH_RISK_RULES = (
     ),
     RiskRule(
         "cannot_stay_safe",
-        re.compile(r"(无法|不能|没法).{0,6}(保证|确保).{0,4}(自己|我)?.{0,4}安全|我现在不安全"),
+        re.compile(
+            r"(无法|不能|没法).{0,6}(保证|确保).{0,4}(自己|我)?.{0,4}安全|"
+            r"我现在不安全|我现在感觉很危险"
+        ),
         RiskLevel.HIGH,
         immediate_danger=True,
     ),
