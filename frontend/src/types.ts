@@ -30,6 +30,9 @@ export interface KnowledgeHit {
   summary: string;
   suggested_actions: string[];
   score: number;
+  bm25_score: number;
+  semantic_score: number;
+  matched_terms: string[];
   source_name: string | null;
   source_url: string | null;
 }
@@ -55,9 +58,11 @@ export interface ReviewerTrace {
   motivation: MotivationState;
   mi_strategies: string[];
   rag_used: boolean;
+  retrieval_method: string;
   knowledge_hits: KnowledgeHit[];
   quality_flags: string[];
   fallback_used: boolean;
+  processing_ms: number;
 }
 
 export interface ChatResponse {
