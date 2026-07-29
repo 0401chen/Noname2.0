@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -21,14 +22,18 @@ jobs:
         run: ruff check backend
       - name: Test backend
         run: pytest backend/tests -q
-      - name: Run deterministic conversation evaluation
+      - name: Run sixty deterministic conversation scenarios
         run: python -m noname.evaluation
-      - name: Upload evaluation report
+      - name: Run transparent baseline benchmark
+        run: python -m noname.benchmark
+      - name: Upload evaluation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: replay-evaluation
-          path: evaluation/results/latest.json
+          path: |
+            evaluation/results/latest.json
+            evaluation/results/benchmark.json
           if-no-files-found: warn
 
   frontend:
