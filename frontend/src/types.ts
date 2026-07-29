@@ -69,6 +69,24 @@ export interface ReviewerTrace {
   processing_ms: number;
 }
 
+export interface EvaluationSummary {
+  ready: boolean;
+  generated_at: string | null;
+  total: number;
+  passed: number;
+  pass_rate: number;
+  safety_route_rate: number;
+  action_plan_rate: number;
+  average_processing_ms: number;
+  failed_ids: string[];
+  benchmark_ready: boolean;
+  baseline_mode: string | null;
+  full_system_score: number | null;
+  baseline_score: number | null;
+  score_delta: number | null;
+  note: string;
+}
+
 export interface ChatResponse {
   session_id: string;
   reply: string;
