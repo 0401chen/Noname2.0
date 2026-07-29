@@ -72,7 +72,8 @@ SUSTAIN_PATTERNS = (
     re.compile(r"(不能少|必须玩|队友需要|只有游戏)"),
 )
 
-RULER_PATTERN = re.compile(r"(?:重要|想改变|把握|信心).{0,8}([0-9]|10)\s*分")
+RULER_PATTERN = re.compile(r"(?:重要|想改变|把握|信心|愿意).{0,8}(10|[0-9])\s*分")
+BARE_RULER_PATTERN = re.compile(r"^\s*(10|[0-9])\s*(?:分)?\s*$")
 PLAN_PATTERN = re.compile(
     r"(计划|试试|我试试|可以试|愿意试|试三天|怎么做|可以做什么|提前.{0,5}分钟)"
 )
@@ -100,16 +101,26 @@ def _extract(patterns: tuple[re.Pattern[str], ...], text: str) -> list[str]:
     return [text] if any(pattern.search(text) for pattern in patterns) else []
 
 
+def _bare_ruler_score(state: SessionState, text: str) -> int | None:
+    match = BARE_RULER_PATTERN.fullmatch(text)
+    if match is None or not state.messages:
+        return None
+    return int(match.group(1))
+
+
 def _choose_stage(
     state: SessionState,
     focus_topic: str | None,
     change_talk: list[str],
     text: str,
+    bare_score: int | None,
 ) -> ConversationStage:
     if state.action_plan is not None:
         return ConversationStage.REVIEW
     if PLAN_PATTERN.search(text):
         return ConversationStage.PLAN
+    if bare_score is not None:
+        return ConversationStage.EVOKE
     if change_talk:
         return ConversationStage.EVOKE
     if focus_topic or len(state.messages) >= 2:
@@ -121,11 +132,18 @@ def _choose_strategies(
     stage: ConversationStage,
     change_talk: list[str],
     sustain_talk: list[str],
+    bare_score: int | None,
 ) -> list[MIStrategy]:
     if stage is ConversationStage.REVIEW:
         return [MIStrategy.AFFIRMATION, MIStrategy.REVIEW_AND_ADJUST]
     if stage is ConversationStage.PLAN:
         return [MIStrategy.ASK_PERMISSION, MIStrategy.ACTION_PLANNING]
+    if bare_score is not None:
+        if bare_score <= 3:
+            return [MIStrategy.AUTONOMY_SUPPORT, MIStrategy.READINESS_RULER]
+        if bare_score >= 8:
+            return [MIStrategy.AFFIRMATION, MIStrategy.ELICIT_CHANGE_TALK]
+        return [MIStrategy.READINESS_RULER, MIStrategy.ELICIT_CHANGE_TALK]
     if change_talk and sustain_talk:
         return [MIStrategy.DOUBLE_SIDED_REFLECTION, MIStrategy.ELICIT_CHANGE_TALK]
     if change_talk:
@@ -153,33 +171,45 @@ def heuristic_analysis(
             next_goal="确认当前安全并连接现实支持",
         )
 
-    focus_topic = _first_matching_topic(text) or (
-        state.analysis.focus_topic if state.analysis else None
-    )
+    previous = state.analysis
+    focus_topic = _first_matching_topic(text) or (previous.focus_topic if previous else None)
+    current_needs = _needs(text)
+    psychological_needs = current_needs or (previous.psychological_needs if previous else [])
+    current_emotions = [
+        word
+        for word in ("烦躁", "焦虑", "低落", "孤独", "压力", "绝望")
+        if word in text
+    ]
+    emotions = current_emotions or (previous.emotions if previous and len(text.strip()) <= 3 else [])
+
     change_talk = _extract(CHANGE_PATTERNS, text)
     sustain_talk = _extract(SUSTAIN_PATTERNS, text)
-    stage = _choose_stage(state, focus_topic, change_talk, text)
-    strategies = _choose_strategies(stage, change_talk, sustain_talk)
+    bare_score = _bare_ruler_score(state, text)
+    stage = _choose_stage(state, focus_topic, change_talk, text, bare_score)
+    strategies = _choose_strategies(stage, change_talk, sustain_talk, bare_score)
 
     ruler_match = RULER_PATTERN.search(text)
-    confidence = int(ruler_match.group(1)) if ruler_match and "信心" in text else None
-    importance = int(ruler_match.group(1)) if ruler_match and "信心" not in text else None
+    explicit_score = int(ruler_match.group(1)) if ruler_match else None
+    confidence = explicit_score if ruler_match and "信心" in text else None
+    importance = explicit_score if ruler_match and "信心" not in text else bare_score
 
     rag_required = bool(
         stage in {ConversationStage.PLAN, ConversationStage.REVIEW}
         or re.search(r"(怎么办|怎么做|方法|建议|睡眠|焦虑|压力)", text)
     )
 
+    summary = (
+        f"用户给出了 {bare_score}/10 的改变意愿评分"
+        if bare_score is not None
+        else f"用户正在讨论{focus_topic or '游戏与生活的关系'}"
+    )
+
     return ConversationAnalysis(
-        summary=f"用户正在讨论{focus_topic or '游戏与生活的关系'}",
+        summary=summary,
         stage=stage,
         focus_topic=focus_topic,
-        emotions=[
-            word
-            for word in ("烦躁", "焦虑", "低落", "孤独", "压力", "绝望")
-            if word in text
-        ],
-        psychological_needs=_needs(text),
+        emotions=emotions,
+        psychological_needs=psychological_needs,
         change_talk=change_talk,
         sustain_talk=sustain_talk,
         motivation=MotivationState(importance=importance, confidence=confidence),
@@ -187,11 +217,15 @@ def heuristic_analysis(
         mi_strategies=strategies,
         rag_required=rag_required,
         rag_queries=[item for item in (focus_topic, "微行动") if item] if rag_required else [],
-        next_goal={
-            ConversationStage.ENGAGE: "理解游戏对用户的价值",
-            ConversationStage.FOCUS: "与用户共同选定一个优先问题",
-            ConversationStage.EVOKE: "引出用户自己的改变理由",
-            ConversationStage.PLAN: "形成足够小且由用户选择的行动实验",
-            ConversationStage.REVIEW: "复盘有效条件并调整实验",
-        }.get(stage, "继续理解用户"),
+        next_goal=(
+            "理解评分背后的理由，不推动用户过快进入计划"
+            if bare_score is not None and bare_score <= 3
+            else {
+                ConversationStage.ENGAGE: "理解游戏对用户的价值",
+                ConversationStage.FOCUS: "与用户共同选定一个优先问题",
+                ConversationStage.EVOKE: "引出用户自己的改变理由",
+                ConversationStage.PLAN: "形成足够小且由用户选择的行动实验",
+                ConversationStage.REVIEW: "复盘有效条件并调整实验",
+            }.get(stage, "继续理解用户")
+        ),
     )
