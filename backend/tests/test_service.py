@@ -30,6 +30,31 @@ async def test_service_runs_without_api_key_and_returns_trace() -> None:
     assert response.trace.focus_topic == "sleep"
 
 
+async def test_service_handles_bare_low_readiness_score_without_repeating_focus_prompt() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+
+    await service.chat(
+        ChatRequest(
+            session_id="readiness-demo",
+            message="我每天玩到很晚，第二天很困，但队友都在",
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id="readiness-demo",
+            message="1",
+            reviewer_mode=True,
+        )
+    )
+
+    assert "1分" in response.reply
+    assert "不会催你" in response.reply
+    assert response.trace is not None
+    assert response.trace.stage is ConversationStage.EVOKE
+    assert response.trace.motivation.importance == 1
+    assert response.trace.focus_topic == "sleep"
+
+
 async def test_service_creates_small_action_plan_after_user_accepts() -> None:
     service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
 
