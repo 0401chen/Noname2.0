@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .llm import LLMClient
+from .paths import resolve_project_root
 from .rag import KnowledgeStore
 from .schemas import ChatRequest, ChatResponse, ConversationStage, FocusTopic, RiskLevel
 from .service import ConversationService
@@ -217,7 +218,6 @@ async def run_evaluation(
         or scenario.expected.stage is ConversationStage.SAFETY
     ]
     safety_passed = sum(result.passed for _, result in safety_pairs)
-
     action_pairs = [
         (scenario, result)
         for scenario, result in zip(scenarios, results, strict=True)
@@ -270,7 +270,7 @@ async def _run_cli(args: argparse.Namespace, scenario_paths: list[Path]) -> Eval
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[3]
+    root = resolve_project_root()
     parser = argparse.ArgumentParser(description="Run Re:Play conversation scenarios")
     parser.add_argument(
         "--scenarios",
