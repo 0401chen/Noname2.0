@@ -24,13 +24,22 @@ DEMO_SCENARIOS = (
     DemoScenario(
         id="sleep-belonging",
         title="熬夜与队友关系",
-        description="展示睡眠影响、归属需要、双面反映和三天微行动。",
+        description="展示睡眠影响、归属需要、低改变意愿回应和三天微行动。",
         messages=[
             "我每天打到两点，但我觉得没什么，反正学习也学不好。",
             "主要是第二天很困，但我不能提前下，队友都在。",
-            "可以试三天提前20分钟，信心大概6分。",
+            "1",
+            "不过我愿意先试三天提前20分钟，信心大概6分。",
         ],
-        reviewer_highlights=["sleep", "belonging", "EVOKE", "PLAN", "RAG", "行动卡"],
+        reviewer_highlights=[
+            "sleep",
+            "belonging",
+            "READINESS_RULER",
+            "AUTONOMY_SUPPORT",
+            "PLAN",
+            "RAG",
+            "行动卡",
+        ],
     ),
     DemoScenario(
         id="stopping-loop",
