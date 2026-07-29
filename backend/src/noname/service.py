@@ -3,17 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from time import perf_counter
 
-from .dialogue_guard import (
-    align_quick_replies,
-    correction_reply,
-    is_neutral_preference,
-    is_user_correction,
-    neutral_preference_reply,
-)
+from .dialogue_guard import align_quick_replies
 from .llm import GeneratedReply, LLMClient
 from .mi import heuristic_analysis
 from .quality import review_reply
 from .rag import KnowledgeStore
+from .routing import (
+    classify_interaction,
+    direct_route_reply,
+    is_repetitive_reply,
+    repair_repetitive_reply,
+    route_analysis,
+    should_replace_saved_analysis,
+)
 from .safety import assess_rule_risk, merge_risk, safety_reply
 from .schemas import (
     ActionPlan,
@@ -22,6 +24,7 @@ from .schemas import (
     ChatResponse,
     ConversationAnalysis,
     ConversationStage,
+    InteractionRoute,
     KnowledgeHit,
     ReviewerTrace,
     RiskLevel,
@@ -60,18 +63,21 @@ class ConversationService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
-        correction = is_user_correction(request.message)
-        neutral_first_turn = is_neutral_preference(request.message) and not state.messages
-
         rule_risk = assess_rule_risk(request.message)
-        fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
+        route = classify_interaction(request.message, state)
 
+        if rule_risk.level is not RiskLevel.HIGH and route is not InteractionRoute.SUPPORT:
+            return self._handle_direct_route(
+                request=request,
+                state=state,
+                route=route,
+                started_at=started_at,
+                rule_risk=rule_risk,
+            )
+
+        fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
         semantic_analysis = None
-        if (
-            rule_risk.level is not RiskLevel.HIGH
-            and not correction
-            and not neutral_first_turn
-        ):
+        if rule_risk.level is not RiskLevel.HIGH:
             semantic_analysis = await self.llm.analyze(
                 state,
                 request.message,
@@ -118,16 +124,6 @@ class ConversationService:
         fallback_used = False
         if analysis.risk.level is RiskLevel.HIGH:
             reply, quick_replies = safety_reply(analysis.risk)
-        elif correction:
-            generated = correction_reply()
-            reply = generated.reply
-            quick_replies = generated.quick_replies
-            fallback_used = True
-        elif neutral_first_turn:
-            generated = neutral_preference_reply(request.message)
-            reply = generated.reply
-            quick_replies = generated.quick_replies
-            fallback_used = True
         else:
             generated = await self.llm.generate_reply(
                 state,
@@ -142,7 +138,19 @@ class ConversationService:
             quick_replies = generated.quick_replies
 
         quick_replies = align_quick_replies(request.message, analysis, quick_replies)
-        quality_flags = review_reply(reply, analysis)
+        quality_flags: list[str] = []
+        if is_repetitive_reply(state, reply):
+            generated = repair_repetitive_reply(
+                InteractionRoute.SUPPORT,
+                request.message,
+                analysis,
+            )
+            reply = generated.reply
+            quick_replies = generated.quick_replies
+            fallback_used = True
+            quality_flags.append("repeated_generation_replaced")
+
+        quality_flags.extend(review_reply(reply, analysis))
         if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
             generated = self._fallback_reply(analysis, knowledge_hits)
             reply = generated.reply
@@ -160,34 +168,20 @@ class ConversationService:
         elif state.action_plan is not None and analysis.stage is ConversationStage.REVIEW:
             self._update_action_plan_progress(state.action_plan, request.message)
 
-        state.messages.append(ChatMessage(role="user", content=request.message))
-        state.messages.append(ChatMessage(role="assistant", content=reply))
-        if len(state.messages) > self.max_messages:
-            state.messages = state.messages[-self.max_messages :]
+        self._append_messages(state, request.message, reply)
         state.analysis = analysis
-        state.updated_at = datetime.now(timezone.utc)
-        self.sessions.save(state)
+        self._save_state(state)
 
         processing_ms = round((perf_counter() - started_at) * 1000, 2)
-        trace = None
-        if request.reviewer_mode:
-            trace = ReviewerTrace(
-                stage=analysis.stage,
-                risk=analysis.risk,
-                focus_topic=analysis.focus_topic,
-                emotions=analysis.emotions,
-                psychological_needs=analysis.psychological_needs,
-                change_talk=analysis.change_talk,
-                sustain_talk=analysis.sustain_talk,
-                motivation=analysis.motivation,
-                mi_strategies=analysis.mi_strategies,
-                rag_used=bool(knowledge_hits),
-                retrieval_method=self.knowledge.method if knowledge_hits else "none",
-                knowledge_hits=knowledge_hits,
-                quality_flags=quality_flags,
-                fallback_used=fallback_used,
-                processing_ms=processing_ms,
-            )
+        trace = self._build_trace(
+            request=request,
+            route=InteractionRoute.SUPPORT,
+            analysis=analysis,
+            knowledge_hits=knowledge_hits,
+            quality_flags=quality_flags,
+            fallback_used=fallback_used,
+            processing_ms=processing_ms,
+        )
 
         return ChatResponse(
             session_id=state.session_id,
@@ -195,6 +189,88 @@ class ConversationService:
             quick_replies=quick_replies,
             action_plan=state.action_plan,
             trace=trace,
+        )
+
+    def _handle_direct_route(
+        self,
+        *,
+        request: ChatRequest,
+        state: SessionState,
+        route: InteractionRoute,
+        started_at: float,
+        rule_risk,
+    ) -> ChatResponse:
+        analysis = route_analysis(route, rule_risk)
+        generated = direct_route_reply(route, request.message, state)
+        quality_flags = review_reply(generated.reply, analysis)
+
+        if is_repetitive_reply(state, generated.reply):
+            generated = repair_repetitive_reply(route, request.message, analysis)
+            quality_flags = [*quality_flags, "repeated_generation_replaced"]
+
+        self._append_messages(state, request.message, generated.reply)
+        if should_replace_saved_analysis(route):
+            state.analysis = analysis
+        self._save_state(state)
+
+        processing_ms = round((perf_counter() - started_at) * 1000, 2)
+        trace = self._build_trace(
+            request=request,
+            route=route,
+            analysis=analysis,
+            knowledge_hits=[],
+            quality_flags=quality_flags,
+            fallback_used=False,
+            processing_ms=processing_ms,
+        )
+        return ChatResponse(
+            session_id=state.session_id,
+            reply=generated.reply,
+            quick_replies=generated.quick_replies,
+            action_plan=state.action_plan,
+            trace=trace,
+        )
+
+    def _append_messages(self, state: SessionState, user_message: str, reply: str) -> None:
+        state.messages.append(ChatMessage(role="user", content=user_message))
+        state.messages.append(ChatMessage(role="assistant", content=reply))
+        if len(state.messages) > self.max_messages:
+            state.messages = state.messages[-self.max_messages :]
+
+    def _save_state(self, state: SessionState) -> None:
+        state.updated_at = datetime.now(timezone.utc)
+        self.sessions.save(state)
+
+    def _build_trace(
+        self,
+        *,
+        request: ChatRequest,
+        route: InteractionRoute,
+        analysis: ConversationAnalysis,
+        knowledge_hits: list[KnowledgeHit],
+        quality_flags: list[str],
+        fallback_used: bool,
+        processing_ms: float,
+    ) -> ReviewerTrace | None:
+        if not request.reviewer_mode:
+            return None
+        return ReviewerTrace(
+            intent_route=route,
+            stage=analysis.stage,
+            risk=analysis.risk,
+            focus_topic=analysis.focus_topic,
+            emotions=analysis.emotions,
+            psychological_needs=analysis.psychological_needs,
+            change_talk=analysis.change_talk,
+            sustain_talk=analysis.sustain_talk,
+            motivation=analysis.motivation,
+            mi_strategies=analysis.mi_strategies,
+            rag_used=bool(knowledge_hits),
+            retrieval_method=self.knowledge.method if knowledge_hits else "none",
+            knowledge_hits=knowledge_hits,
+            quality_flags=quality_flags,
+            fallback_used=fallback_used,
+            processing_ms=processing_ms,
         )
 
     @staticmethod
