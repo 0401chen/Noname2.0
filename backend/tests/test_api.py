@@ -13,6 +13,19 @@ async def test_health_endpoint_reports_runtime_mode() -> None:
     assert payload["status"] == "ok"
     assert isinstance(payload["llm_enabled"], bool)
     assert payload["model"]
+    assert payload["storage"] in {"sqlite", "memory"}
+    assert payload["knowledge_entries"] > 0
+
+
+async def test_evaluation_summary_endpoint_is_always_available() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/evaluation/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload["ready"], bool)
+    assert payload["note"]
 
 
 async def test_chat_endpoint_has_offline_fallback() -> None:
