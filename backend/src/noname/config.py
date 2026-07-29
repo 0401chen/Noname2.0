@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     session_storage: str = "sqlite"
     session_database_path: str = "runtime/replay.sqlite3"
     session_max_messages: int = Field(default=40, ge=8, le=200)
+    session_retention_hours: int = Field(default=24, ge=1, le=720)
+    session_cleanup_interval_seconds: int = Field(default=300, ge=30, le=86400)
 
     llm_api_key: str = Field(
         default="",
@@ -37,6 +39,14 @@ class Settings(BaseSettings):
     )
     llm_timeout_seconds: float = Field(default=35.0, ge=3, le=120)
 
+    @field_validator("session_storage")
+    @classmethod
+    def validate_session_storage(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"memory", "sqlite"}:
+            raise ValueError("SESSION_STORAGE must be either 'memory' or 'sqlite'")
+        return normalized
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
@@ -47,7 +57,7 @@ class Settings(BaseSettings):
 
     @property
     def use_sqlite_sessions(self) -> bool:
-        return self.session_storage.strip().lower() == "sqlite"
+        return self.session_storage == "sqlite"
 
 
 @lru_cache
