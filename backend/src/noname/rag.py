@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .paths import knowledge_file
 from .schemas import KnowledgeHit, RiskLevel
 
 
@@ -77,8 +78,7 @@ class KnowledgeStore:
     method = "bm25+char-ngram"
 
     def __init__(self, path: Path | None = None) -> None:
-        default_path = Path(__file__).resolve().parents[3] / "knowledge" / "reviewed" / "core.json"
-        self.path = path or default_path
+        self.path = path or knowledge_file()
         self.entries = self._load_entries()
         self._documents = [self._searchable_text(entry) for entry in self.entries]
         self._token_counts = [Counter(tokenize(document)) for document in self._documents]
