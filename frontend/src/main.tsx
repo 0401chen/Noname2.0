@@ -6,6 +6,7 @@ import { installBranding } from "./branding";
 import "./styles.css";
 import "./reviewer.css";
 import "./demo.css";
+import "./layout-fixes.css";
 
 installBranding();
 
