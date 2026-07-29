@@ -20,7 +20,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.6.0"
 AGENT_NAME = "Noname助手"
 settings = get_settings()
 knowledge = KnowledgeStore()
