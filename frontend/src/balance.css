@@ -1,0 +1,23 @@
+.balance-groups {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.balance-group small {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.balance-group .tag-list {
+  margin: 0;
+}
+
+.balance-group.candidate .tag-list span {
+  color: #6b6250;
+  background: #fbf7e9;
+  border: 1px dashed #ddcfaa;
+}
