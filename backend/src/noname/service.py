@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from time import perf_counter
 
 from .llm import GeneratedReply, LLMClient
 from .mi import heuristic_analysis
@@ -14,28 +15,12 @@ from .schemas import (
     ChatResponse,
     ConversationAnalysis,
     ConversationStage,
+    KnowledgeHit,
     ReviewerTrace,
     RiskLevel,
     SessionState,
 )
-
-
-class InMemorySessionStore:
-    def __init__(self) -> None:
-        self._sessions: dict[str, SessionState] = {}
-
-    def get_or_create(self, session_id: str, age_group: str | None = None) -> SessionState:
-        if session_id not in self._sessions:
-            self._sessions[session_id] = SessionState(
-                session_id=session_id,
-                age_group=age_group,
-            )
-        elif age_group:
-            self._sessions[session_id].age_group = age_group
-        return self._sessions[session_id]
-
-    def clear(self, session_id: str) -> bool:
-        return self._sessions.pop(session_id, None) is not None
+from .storage import MemorySessionStore, SessionStore
 
 
 class ConversationService:
@@ -44,13 +29,16 @@ class ConversationService:
         *,
         llm: LLMClient,
         knowledge: KnowledgeStore,
-        sessions: InMemorySessionStore | None = None,
+        sessions: SessionStore | None = None,
+        max_messages: int = 40,
     ) -> None:
         self.llm = llm
         self.knowledge = knowledge
-        self.sessions = sessions or InMemorySessionStore()
+        self.sessions = sessions or MemorySessionStore()
+        self.max_messages = max(8, max_messages)
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
+        started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
         rule_risk = assess_rule_risk(request.message)
         fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
@@ -71,7 +59,7 @@ class ConversationService:
             analysis.rag_required = False
             analysis.rag_queries = []
 
-        knowledge_hits = []
+        knowledge_hits: list[KnowledgeHit] = []
         if analysis.rag_required or analysis.risk.level is RiskLevel.HIGH:
             query = " ".join(
                 [
@@ -124,9 +112,13 @@ class ConversationService:
 
         state.messages.append(ChatMessage(role="user", content=request.message))
         state.messages.append(ChatMessage(role="assistant", content=reply))
+        if len(state.messages) > self.max_messages:
+            state.messages = state.messages[-self.max_messages :]
         state.analysis = analysis
         state.updated_at = datetime.now(timezone.utc)
+        self.sessions.save(state)
 
+        processing_ms = round((perf_counter() - started_at) * 1000, 2)
         trace = None
         if request.reviewer_mode:
             trace = ReviewerTrace(
@@ -140,9 +132,11 @@ class ConversationService:
                 motivation=analysis.motivation,
                 mi_strategies=analysis.mi_strategies,
                 rag_used=bool(knowledge_hits),
+                retrieval_method=self.knowledge.method if knowledge_hits else "none",
                 knowledge_hits=knowledge_hits,
                 quality_flags=quality_flags,
                 fallback_used=fallback_used,
+                processing_ms=processing_ms,
             )
 
         return ChatResponse(
@@ -156,7 +150,7 @@ class ConversationService:
     def _fallback_reply(
         self,
         analysis: ConversationAnalysis,
-        knowledge_hits: list,
+        knowledge_hits: list[KnowledgeHit],
     ) -> GeneratedReply:
         if analysis.risk.level is RiskLevel.HIGH:
             reply, quick_replies = safety_reply(analysis.risk)
@@ -202,10 +196,14 @@ class ConversationService:
             )
 
         if stage is ConversationStage.EVOKE:
-            social_value = "又不失去和队友的联系" if needs & {"belonging", "connection"} else "又保留游戏带来的放松"
+            social_value = (
+                "又不失去和队友的联系"
+                if needs & {"belonging", "connection"}
+                else "又保留游戏带来的放松"
+            )
             return GeneratedReply(
                 reply=(
-                    f"一方面，游戏确实给了你需要的东西；另一方面，你也不喜欢它现在带来的一些影响。"
+                    "一方面，游戏确实给了你需要的东西；另一方面，你也不喜欢它现在带来的一些影响。"
                     f"在{social_value}的情况下，你最愿意先改善哪一小点？"
                 ),
                 quick_replies=["第二天别那么困", "少拖一点作业", "更容易停下来", "暂时不想改"],
@@ -240,8 +238,14 @@ class ConversationService:
         message: str,
         analysis: ConversationAnalysis,
     ) -> ActionPlan | None:
-        accepted = any(token in message for token in ("可以试", "我试试", "提前20分钟", "提前二十分钟", "试三天"))
-        if not accepted or analysis.stage not in {ConversationStage.PLAN, ConversationStage.EVOKE}:
+        accepted = any(
+            token in message
+            for token in ("可以试", "我试试", "提前20分钟", "提前二十分钟", "试三天")
+        )
+        if not accepted or analysis.stage not in {
+            ConversationStage.PLAN,
+            ConversationStage.EVOKE,
+        }:
             return None
 
         confidence = analysis.motivation.confidence or 6
