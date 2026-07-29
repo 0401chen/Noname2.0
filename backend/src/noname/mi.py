@@ -43,6 +43,9 @@ SUSTAIN_PATTERNS = (
 )
 
 RULER_PATTERN = re.compile(r"(?:重要|想改变|把握|信心).{0,8}([0-9]|10)\s*分")
+PLAN_PATTERN = re.compile(
+    r"(计划|试试|我试试|可以试|愿意试|试三天|怎么做|可以做什么|提前.{0,5}分钟)"
+)
 
 
 def _first_matching_topic(text: str) -> str | None:
@@ -75,7 +78,7 @@ def _choose_stage(
 ) -> ConversationStage:
     if state.action_plan is not None:
         return ConversationStage.REVIEW
-    if re.search(r"(计划|试试|怎么做|可以做什么|提前.{0,5}分钟)", text):
+    if PLAN_PATTERN.search(text):
         return ConversationStage.PLAN
     if change_talk:
         return ConversationStage.EVOKE
