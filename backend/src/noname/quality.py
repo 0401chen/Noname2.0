@@ -4,7 +4,6 @@ import re
 
 from .schemas import ConversationAnalysis, RiskLevel
 
-
 FORBIDDEN_PATTERNS: dict[str, re.Pattern[str]] = {
     "diagnosis_or_label": re.compile(r"(你(已经|就是|属于).{0,5}(成瘾|游戏障碍|抑郁症)|网瘾少年)"),
     "coercive_language": re.compile(r"(你必须|你应该立刻戒掉|每天只能玩|必须听父母)"),
@@ -15,6 +14,9 @@ FORBIDDEN_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
     "internal_trace_leak": re.compile(
         r"(系统提示词|内部风险分数|当前MI阶段|当前 MI 阶段|RAG检索|RAG 检索|审核规则|开发者指令)"
+    ),
+    "overgeneralized_positive_claim": re.compile(
+        r"(游戏确实是(一个)?(很好|非常好|有益)的|游戏本来就是很好的|玩游戏当然没有任何问题)"
     ),
 }
 
@@ -29,7 +31,18 @@ def review_reply(reply: str, analysis: ConversationAnalysis) -> list[str]:
     if analysis.risk.level is RiskLevel.HIGH and "安全" not in reply:
         flags.append("high_risk_without_safety_focus")
     if analysis.risk.level is not RiskLevel.HIGH and not any(
-        marker in reply for marker in ("听起来", "一方面", "似乎", "你更", "对你来说", "你不想", "你给了")
+        marker in reply
+        for marker in (
+            "听起来",
+            "一方面",
+            "似乎",
+            "你更",
+            "对你来说",
+            "你不想",
+            "你给了",
+            "你提到了",
+            "你说得对",
+        )
     ):
         flags.append("missing_reflection_marker")
 
