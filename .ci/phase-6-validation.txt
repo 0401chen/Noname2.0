@@ -1,0 +1,1 @@
+Trigger CI for snapshot 29 follow-up release 0.6.0.
