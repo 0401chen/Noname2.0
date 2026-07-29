@@ -55,6 +55,12 @@ const needLabels: Record<string, string> = {
   connection: "连接与被需要",
 };
 
+const planStatusLabels: Record<ActionPlan["status"], string> = {
+  active: "进行中",
+  completed: "已完成",
+  paused: "已暂停",
+};
+
 function createId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -355,6 +361,14 @@ function App() {
                   <dt>把握程度</dt>
                   <dd>{actionPlan.confidence}/10</dd>
                 </div>
+                <div>
+                  <dt>当前状态</dt>
+                  <dd>{planStatusLabels[actionPlan.status]}</dd>
+                </div>
+                <div>
+                  <dt>复盘记录</dt>
+                  <dd>{actionPlan.successes} 次完成 / {actionPlan.attempts} 次记录</dd>
+                </div>
                 {actionPlan.obstacle && (
                   <div>
                     <dt>可能的困难</dt>
@@ -365,6 +379,12 @@ function App() {
                   <div>
                     <dt>如果遇到困难</dt>
                     <dd>{actionPlan.coping_plan}</dd>
+                  </div>
+                )}
+                {actionPlan.last_review && (
+                  <div>
+                    <dt>最近一次复盘</dt>
+                    <dd>{actionPlan.last_review}</dd>
                   </div>
                 )}
               </dl>
@@ -424,6 +444,11 @@ function ReviewerPanel({ trace }: { trace: ReviewerTrace | null }) {
             value={trace.rag_used ? `${trace.knowledge_hits.length} 条命中` : "本轮无需检索"}
           />
           <TraceRow
+            label="检索方法"
+            value={trace.rag_used ? trace.retrieval_method : "未启用"}
+          />
+          <TraceRow label="处理耗时" value={`${trace.processing_ms.toFixed(0)} ms`} />
+          <TraceRow
             label="生成方式"
             value={trace.fallback_used ? "安全降级模板" : "LLM 实时生成"}
           />
@@ -435,6 +460,10 @@ function ReviewerPanel({ trace }: { trace: ReviewerTrace | null }) {
                 <article key={hit.id}>
                   <strong>{hit.title}</strong>
                   <p>{hit.summary}</p>
+                  <small>
+                    综合 {hit.score.toFixed(2)} · BM25 {hit.bm25_score.toFixed(2)} · n-gram {hit.semantic_score.toFixed(2)}
+                    {hit.matched_terms.length ? ` · 命中：${hit.matched_terms.join("、")}` : ""}
+                  </small>
                   {hit.source_url && (
                     <a href={hit.source_url} target="_blank" rel="noreferrer">
                       {hit.source_name ?? "查看来源"}
