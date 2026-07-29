@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "replay-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "Re:Play 青少年游戏行为心理支持原型后端"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 replay-eval = "noname.evaluation:main"
+replay-benchmark = "noname.benchmark:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/noname"]
