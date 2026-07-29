@@ -22,6 +22,18 @@ from .schemas import (
 )
 from .storage import MemorySessionStore, SessionStore
 
+CRITICAL_QUALITY_FLAGS = {
+    "diagnosis_or_label",
+    "coercive_language",
+    "dependency_language",
+    "false_rescue_claim",
+    "high_risk_without_safety_focus",
+    "deception_or_evasion",
+    "internal_trace_leak",
+    "too_long",
+    "too_many_questions",
+}
+
 
 class ConversationService:
     def __init__(
@@ -52,6 +64,19 @@ class ConversationService:
             )
 
         analysis = semantic_analysis or fallback_analysis
+        if semantic_analysis is not None:
+            if analysis.focus_topic is None:
+                analysis.focus_topic = fallback_analysis.focus_topic
+            if not analysis.psychological_needs:
+                analysis.psychological_needs = fallback_analysis.psychological_needs
+            if not analysis.emotions:
+                analysis.emotions = fallback_analysis.emotions
+            if fallback_analysis.motivation.importance is not None:
+                analysis.motivation.importance = fallback_analysis.motivation.importance
+                analysis.stage = fallback_analysis.stage
+                analysis.mi_strategies = fallback_analysis.mi_strategies
+                analysis.next_goal = fallback_analysis.next_goal
+
         analysis.risk = merge_risk(rule_risk, semantic_analysis.risk if semantic_analysis else None)
         if analysis.risk.level is RiskLevel.HIGH:
             analysis.stage = ConversationStage.SAFETY
@@ -90,16 +115,7 @@ class ConversationService:
             quick_replies = generated.quick_replies
 
         quality_flags = review_reply(reply, analysis)
-        if any(
-            flag in quality_flags
-            for flag in (
-                "diagnosis_or_label",
-                "coercive_language",
-                "dependency_language",
-                "false_rescue_claim",
-                "high_risk_without_safety_focus",
-            )
-        ):
+        if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
             generated = self._fallback_reply(analysis, knowledge_hits)
             reply = generated.reply
             quick_replies = generated.quick_replies
@@ -165,6 +181,40 @@ class ConversationService:
                     "同时也建议你把最近的状态告诉一位可信任的成年人。现在最影响你的是睡眠、上学，还是情绪？"
                 ),
                 quick_replies=["睡眠", "上学", "情绪"],
+            )
+
+        importance = analysis.motivation.importance
+        if importance is not None:
+            if importance == 0:
+                return GeneratedReply(
+                    reply=(
+                        "你给了0分，说明现在并不想把精力放在改变游戏上，这个选择可以被尊重。"
+                        "我们先不谈计划，只把游戏对你最重要的部分弄清楚。"
+                    ),
+                    quick_replies=["主要是放松", "队友很重要", "现实太累", "先不聊改变"],
+                )
+            if importance <= 3:
+                return GeneratedReply(
+                    reply=(
+                        f"你给了{importance}分，听起来改变这件事目前并不太吸引你，我不会催你往前走。"
+                        "即使只有这一点分数，它更像是来自想少困一点、少些争吵，还是别的原因？"
+                    ),
+                    quick_replies=["少困一点", "少些争吵", "更容易停下", "其实不想改"],
+                )
+            if importance >= 8:
+                return GeneratedReply(
+                    reply=(
+                        f"你给了{importance}分，说明这件事对你已经相当重要。"
+                        "在不一下子戒掉游戏的前提下，你觉得哪个最小变化最值得先试？"
+                    ),
+                    quick_replies=["提前20分钟", "少开一局", "先做五分钟作业", "先想想困难"],
+                )
+            return GeneratedReply(
+                reply=(
+                    f"你给了{importance}分，说明你既看到了改变的理由，也还有一些顾虑。"
+                    "是什么让它已经不止更低的分数？"
+                ),
+                quick_replies=["第二天太困", "总和父母吵", "作业被拖延", "想重新能停下"],
             )
 
         stage = analysis.stage
