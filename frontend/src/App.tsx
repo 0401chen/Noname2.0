@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { AGENT_NAME } from "./branding";
 import type {
   ActionPlan,
   ChatResponse,
@@ -59,6 +60,22 @@ const needLabels: Record<string, string> = {
   connection: "连接与被需要",
 };
 
+const strategyLabels: Record<string, string> = {
+  OPEN_QUESTION: "开放式提问",
+  SIMPLE_REFLECTION: "简单反映",
+  COMPLEX_REFLECTION: "复杂反映",
+  AFFIRMATION: "肯定",
+  SUMMARY: "总结",
+  DOUBLE_SIDED_REFLECTION: "双面反映",
+  AUTONOMY_SUPPORT: "支持自主",
+  ELICIT_CHANGE_TALK: "引出改变语言",
+  READINESS_RULER: "改变意愿标尺",
+  CONFIDENCE_RULER: "信心标尺",
+  ASK_PERMISSION: "征求许可",
+  ACTION_PLANNING: "行动计划",
+  REVIEW_AND_ADJUST: "复盘调整",
+};
+
 const planStatusLabels: Record<ActionPlan["status"], string> = {
   active: "进行中",
   completed: "已完成",
@@ -77,7 +94,11 @@ function formatPercent(value: number): string {
 
 function generationLabel(trace: ReviewerTrace): string {
   if (trace.risk.level === "HIGH") return "安全策略模板";
-  return trace.fallback_used ? "离线降级模板" : "LLM 实时生成";
+  return trace.fallback_used ? "离线或审核降级模板" : "LLM 实时生成";
+}
+
+function formatScore(value: number | null): string {
+  return value == null ? "本轮未明确" : `${value}/10`;
 }
 
 const initialMessage: Message = {
@@ -262,7 +283,7 @@ function App() {
           </div>
           <div>
             <div className="brand-line">
-              <h1>重启键</h1>
+              <h1>{AGENT_NAME}</h1>
               <span>Re:Play</span>
             </div>
             <p>不是逼你离开游戏，而是帮你重新拿回选择权。</p>
@@ -372,7 +393,7 @@ function App() {
                   {message.role === "assistant" ? <Bot size={19} /> : <UserRound size={19} />}
                 </div>
                 <div className="message-body">
-                  <span>{message.role === "assistant" ? "重启键" : "我"}</span>
+                  <span>{message.role === "assistant" ? AGENT_NAME : "我"}</span>
                   <p>{message.content}</p>
                 </div>
               </article>
@@ -384,7 +405,7 @@ function App() {
                   <Bot size={19} />
                 </div>
                 <div className="message-body loading-message">
-                  <span>重启键</span>
+                  <span>{AGENT_NAME}</span>
                   <p>
                     <Loader2 className="spin" size={17} />
                     正在理解你刚才说的重点……
@@ -541,6 +562,13 @@ function ReviewerPanel({
   evaluation: EvaluationSummary | null;
   diagnostics: Diagnostics | null;
 }) {
+  const needSummary =
+    trace?.psychological_needs
+      .map((need) => `${needLabels[need.name] ?? need.name} ${(need.confidence * 100).toFixed(0)}%`)
+      .join(" · ") ?? "";
+  const strategySummary =
+    trace?.mi_strategies.map((strategy) => strategyLabels[strategy] ?? strategy).join(" · ") ?? "";
+
   return (
     <section className="side-card reviewer-card">
       <div className="card-title">
@@ -630,13 +658,17 @@ function ReviewerPanel({
             tone={trace.risk.level === "HIGH" ? "danger" : trace.risk.level === "CONCERN" ? "warn" : "safe"}
           />
           <TraceRow
+            label="风险信号"
+            value={trace.risk.signals.length ? trace.risk.signals.join(" · ") : "未触发规则信号"}
+          />
+          <TraceRow
             label="关注问题"
             value={trace.focus_topic ? focusLabels[trace.focus_topic] ?? trace.focus_topic : "尚未聚焦"}
           />
-          <TraceRow
-            label="MI 策略"
-            value={trace.mi_strategies.length ? trace.mi_strategies.join(" · ") : "安全流程优先"}
-          />
+          <TraceRow label="心理需要" value={needSummary || "本轮未明确推断"} />
+          <TraceRow label="改变意愿" value={formatScore(trace.motivation.importance)} />
+          <TraceRow label="行动信心" value={formatScore(trace.motivation.confidence)} />
+          <TraceRow label="MI 策略" value={strategySummary || "安全流程优先"} />
           <TraceRow
             label="改变语言"
             value={trace.change_talk.length ? trace.change_talk.join("；") : "本轮未明确出现"}
