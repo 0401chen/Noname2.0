@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+FocusTopic = Literal["sleep", "stopping", "school", "family", "emotion", "social"]
+
 
 class ConversationStage(StrEnum):
     ENGAGE = "ENGAGE"
@@ -78,7 +80,7 @@ class ActionPlan(BaseModel):
 class ConversationAnalysis(BaseModel):
     summary: str
     stage: ConversationStage = ConversationStage.ENGAGE
-    focus_topic: str | None = None
+    focus_topic: FocusTopic | None = None
     emotions: list[str] = Field(default_factory=list)
     psychological_needs: list[PsychologicalNeed] = Field(default_factory=list)
     change_talk: list[str] = Field(default_factory=list)
@@ -108,7 +110,7 @@ class KnowledgeHit(BaseModel):
 class ReviewerTrace(BaseModel):
     stage: ConversationStage
     risk: RiskAssessment
-    focus_topic: str | None = None
+    focus_topic: FocusTopic | None = None
     emotions: list[str] = Field(default_factory=list)
     psychological_needs: list[PsychologicalNeed] = Field(default_factory=list)
     change_talk: list[str] = Field(default_factory=list)
