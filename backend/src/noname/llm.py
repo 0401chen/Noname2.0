@@ -6,15 +6,10 @@ import re
 from typing import Any
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from .config import Settings
-from .schemas import (
-    ChatMessage,
-    ConversationAnalysis,
-    KnowledgeHit,
-    SessionState,
-)
+from .schemas import ConversationAnalysis, KnowledgeHit, SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +110,8 @@ class LLMClient:
                 "CONFIDENCE_RULER",
                 "ASK_PERMISSION",
                 "ACTION_PLANNING",
-                "REVIEW_AND_ADJUST"
-            ]
+                "REVIEW_AND_ADJUST",
+            ],
         }
 
         try:
@@ -133,7 +128,7 @@ class LLMClient:
             result = ConversationAnalysis.model_validate(_extract_json(content))
             self.last_error = None
             return result
-        except (Exception, ValidationError) as exc:  # network and provider errors degrade safely
+        except Exception as exc:  # network, provider and validation errors degrade safely
             self.last_error = f"analysis: {type(exc).__name__}: {exc}"
             logger.warning("LLM analysis failed: %s", self.last_error)
             return None
@@ -180,7 +175,7 @@ class LLMClient:
             result = GeneratedReply.model_validate(_extract_json(content))
             self.last_error = None
             return result
-        except (Exception, ValidationError) as exc:
+        except Exception as exc:
             self.last_error = f"reply: {type(exc).__name__}: {exc}"
             logger.warning("LLM reply failed: %s", self.last_error)
             return None
