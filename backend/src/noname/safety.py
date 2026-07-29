@@ -27,6 +27,12 @@ HIGH_RISK_RULES = (
         immediate_danger=True,
     ),
     RiskRule(
+        "cannot_stay_safe",
+        re.compile(r"(无法|不能|没法).{0,6}(保证|确保).{0,4}(自己|我)?.{0,4}安全|我现在不安全"),
+        RiskLevel.HIGH,
+        immediate_danger=True,
+    ),
+    RiskRule(
         "violence_or_abuse",
         re.compile(r"(被打|家暴|虐待|性侵|强迫我|威胁我|不让我出门)"),
         RiskLevel.HIGH,
@@ -60,30 +66,28 @@ NEGATION_WINDOW = re.compile(r"(没有|不会|并不|不是).{0,4}(想死|自杀
 
 
 def assess_rule_risk(text: str) -> RiskAssessment:
-    """Conservative rule-based risk scan.
+    """Conservative and auditable first-pass risk scan.
 
-    The rule layer is intentionally small and auditable. A semantic model may raise
-    the level later, but it must never lower a level found here.
+    Explicitly negated phrases are removed before matching. This avoids treating
+    “我没有想死” as an affirmative disclosure while preserving later, separate
+    risk statements in the same message.
     """
 
     normalized = " ".join(text.strip().split())
+    scan_text = NEGATION_WINDOW.sub("", normalized)
     signals: list[str] = []
     level = RiskLevel.LOW
     immediate_danger = False
 
-    negated = bool(NEGATION_WINDOW.search(normalized))
-
     for rule in HIGH_RISK_RULES:
-        if rule.pattern.search(normalized):
-            if negated and rule.name == "self_harm_intent":
-                continue
+        if rule.pattern.search(scan_text):
             signals.append(rule.name)
             level = RiskLevel.HIGH
             immediate_danger = immediate_danger or rule.immediate_danger
 
     if level is not RiskLevel.HIGH:
         for rule in CONCERN_RULES:
-            if rule.pattern.search(normalized):
+            if rule.pattern.search(scan_text):
                 signals.append(rule.name)
                 level = RiskLevel.CONCERN
 
