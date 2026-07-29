@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
