@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     app_port: int = 8000
     cors_origins: str = "http://localhost:5173"
 
+    session_storage: str = "sqlite"
+    session_database_path: str = "runtime/replay.sqlite3"
+    session_max_messages: int = Field(default=40, ge=8, le=200)
+
     llm_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY", "API_KEY"),
@@ -31,7 +35,7 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         validation_alias=AliasChoices("LLM_MODEL", "OPENAI_MODEL"),
     )
-    llm_timeout_seconds: float = 35.0
+    llm_timeout_seconds: float = Field(default=35.0, ge=3, le=120)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -40,6 +44,10 @@ class Settings(BaseSettings):
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key.strip())
+
+    @property
+    def use_sqlite_sessions(self) -> bool:
+        return self.session_storage.strip().lower() == "sqlite"
 
 
 @lru_cache
