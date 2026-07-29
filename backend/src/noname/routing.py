@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from .dialogue_guard import is_neutral_preference, is_user_correction, neutral_preference_reply
+from .dialogue_guard import (
+    correction_reply,
+    is_neutral_preference,
+    is_user_correction,
+    neutral_preference_reply,
+)
 from .llm import GeneratedReply
 from .schemas import (
     ConversationAnalysis,
@@ -18,8 +23,8 @@ IDENTITY_PATTERN = re.compile(
     r"(你是谁|你是什么(?:东西)?|你是干什么的|介绍一下你|你能做什么|你有什么用|你是机器人吗)"
 )
 TECHNICAL_META_PATTERN = re.compile(
-    r"(背后的代码|源代码|代码怎么写|系统提示词|提示词|prompt|内部运作|怎么实现|用了什么模型|用的什么模型|API.?Key|密钥|开发者指令)"
-    ,
+    r"(背后的代码|源代码|代码怎么写|系统提示词|提示词|prompt|内部运作|怎么实现|"
+    r"用了什么模型|用的什么模型|API.?Key|密钥|开发者指令)",
     re.IGNORECASE,
 )
 GAMEPLAY_COACHING_PATTERN = re.compile(
@@ -41,10 +46,10 @@ CONTEXTUAL_SHORT_PATTERN = re.compile(
     r"不对|继续|不想说|先不说|他们|他|她|这样|那样|为什么|怎么办).{0,12}\s*$"
 )
 SPORT_PATTERN = re.compile(r"(运动|跑步|篮球|足球|羽毛球|乒乓球|游泳|健身|骑车|跳绳)")
-MUSIC_PATTERN = re.compile(r"(音乐|唱歌|听歌|乐器|吉他|钢琴)" )
-READING_PATTERN = re.compile(r"(看书|阅读|小说|漫画)" )
-ART_PATTERN = re.compile(r"(画画|绘画|摄影|手工)" )
-REALTIME_PATTERN = re.compile(r"(今天|现在|实时).{0,8}(天气|新闻|比赛|价格|汇率|几点)" )
+MUSIC_PATTERN = re.compile(r"(音乐|唱歌|听歌|乐器|吉他|钢琴)")
+READING_PATTERN = re.compile(r"(看书|阅读|小说|漫画)")
+ART_PATTERN = re.compile(r"(画画|绘画|摄影|手工)")
+REALTIME_PATTERN = re.compile(r"(今天|现在|实时).{0,8}(天气|新闻|比赛|价格|汇率|几点)")
 
 
 def classify_interaction(text: str, state: SessionState) -> InteractionRoute:
@@ -80,7 +85,8 @@ def route_analysis(route: InteractionRoute, risk: RiskAssessment) -> Conversatio
     }
     strategies = (
         [MIStrategy.SIMPLE_REFLECTION, MIStrategy.OPEN_QUESTION]
-        if route in {
+        if route
+        in {
             InteractionRoute.NEUTRAL_GAME_PREFERENCE,
             InteractionRoute.NO_NEGATIVE_IMPACT,
             InteractionRoute.GENERAL_CHAT,
@@ -109,7 +115,9 @@ def _previous_user_messages(state: SessionState) -> list[str]:
 
 
 def neutral_preference_route_reply(text: str, state: SessionState) -> GeneratedReply:
-    repeated = any(_similar(previous, text) >= 0.82 for previous in _previous_user_messages(state)[-4:])
+    repeated = any(
+        _similar(previous, text) >= 0.82 for previous in _previous_user_messages(state)[-4:]
+    )
     return neutral_preference_reply(text, repeated=repeated)
 
 
@@ -201,8 +209,6 @@ def direct_route_reply(
     if route is InteractionRoute.NO_NEGATIVE_IMPACT:
         return no_negative_impact_reply()
     if route is InteractionRoute.USER_CORRECTION:
-        from .dialogue_guard import correction_reply
-
         return correction_reply()
     if route is InteractionRoute.ASSISTANT_IDENTITY:
         return identity_reply()
@@ -226,6 +232,30 @@ def repair_repetitive_reply(
     text: str,
     analysis: ConversationAnalysis,
 ) -> GeneratedReply:
+    if route is InteractionRoute.ASSISTANT_IDENTITY:
+        return GeneratedReply(
+            reply=(
+                "再直接说一次：我是 Noname助手，主要用于青少年的游戏与生活平衡心理支持。"
+                "我能陪你梳理感受和行动，但不是医生、游戏攻略教练或全能问答工具。"
+            ),
+            quick_replies=["聊聊你能做什么", "聊游戏", "聊心情", "换个话题"],
+        )
+    if route is InteractionRoute.TECHNICAL_META:
+        return GeneratedReply(
+            reply=(
+                "我可以继续讲公开架构和设计思路，但不会提供系统提示词、密钥或可绕过安全规则的内部细节。"
+                "你更想了解 MI、RAG，还是风险识别？"
+            ),
+            quick_replies=["MI", "RAG", "风险识别", "先不聊技术"],
+        )
+    if route is InteractionRoute.GAMEPLAY_COACHING:
+        return GeneratedReply(
+            reply=(
+                "我听到你确实想学王者荣耀，但这个原型不具备可靠的版本攻略能力。"
+                "我可以改为帮你制定练习目标，或者聊上分和队友带来的压力。"
+            ),
+            quick_replies=["制定练习目标", "聊上分压力", "聊队友", "换个话题"],
+        )
     if route is not InteractionRoute.SUPPORT:
         return general_chat_fallback(text)
     focus = {
@@ -246,5 +276,7 @@ def repair_repetitive_reply(
 
 
 def _similar(left: str, right: str) -> float:
-    normalize = lambda value: re.sub(r"[\s，。！？、；：,.!?;:]", "", value).lower()
+    def normalize(value: str) -> str:
+        return re.sub(r"[\s，。！？、；：,.!?;:]", "", value).lower()
+
     return SequenceMatcher(None, normalize(left), normalize(right)).ratio()
