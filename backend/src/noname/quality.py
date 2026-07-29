@@ -19,10 +19,19 @@ FORBIDDEN_PATTERNS: dict[str, re.Pattern[str]] = {
         r"(游戏确实是(一个)?(很好|非常好|有益)的|游戏本来就是很好的|玩游戏当然没有任何问题)"
     ),
 }
+SAFE_INTERNAL_BOUNDARY = re.compile(
+    r"(不会|不能|无法|不提供|不展示|拒绝).{0,16}(系统提示词|API\s*密钥|密钥|内部安全配置|开发者指令)"
+)
 
 
 def review_reply(reply: str, analysis: ConversationAnalysis) -> list[str]:
-    flags = [name for name, pattern in FORBIDDEN_PATTERNS.items() if pattern.search(reply)]
+    flags: list[str] = []
+    for name, pattern in FORBIDDEN_PATTERNS.items():
+        if not pattern.search(reply):
+            continue
+        if name == "internal_trace_leak" and SAFE_INTERNAL_BOUNDARY.search(reply):
+            continue
+        flags.append(name)
 
     if len(reply) > 420:
         flags.append("too_long")
@@ -42,6 +51,9 @@ def review_reply(reply: str, analysis: ConversationAnalysis) -> list[str]:
             "你给了",
             "你提到了",
             "你说得对",
+            "明白",
+            "我是",
+            "可以",
         )
     ):
         flags.append("missing_reflection_marker")
