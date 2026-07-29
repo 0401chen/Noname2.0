@@ -21,6 +21,7 @@ logging.basicConfig(
 )
 
 APP_VERSION = "0.4.0"
+AGENT_NAME = "Noname助手"
 settings = get_settings()
 knowledge = KnowledgeStore()
 store_options = {
@@ -40,7 +41,7 @@ service = ConversationService(
 )
 
 app = FastAPI(
-    title="重启键 Re:Play API",
+    title=f"{AGENT_NAME} Re:Play API",
     version=APP_VERSION,
     description="面向青少年的游戏行为心理支持比赛原型。仅用于支持和演示，不进行医学诊断。",
 )
@@ -57,7 +58,7 @@ app.add_middleware(
 @app.get("/")
 async def root() -> dict[str, str]:
     return {
-        "name": "重启键 Re:Play",
+        "name": f"{AGENT_NAME} Re:Play",
         "tagline": "不是逼你离开游戏，而是帮你重新拿回选择权。",
         "version": APP_VERSION,
         "docs": "/docs",
