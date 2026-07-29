@@ -24,6 +24,17 @@ class RiskLevel(StrEnum):
     HIGH = "HIGH"
 
 
+class InteractionRoute(StrEnum):
+    SUPPORT = "SUPPORT"
+    NEUTRAL_GAME_PREFERENCE = "NEUTRAL_GAME_PREFERENCE"
+    NO_NEGATIVE_IMPACT = "NO_NEGATIVE_IMPACT"
+    USER_CORRECTION = "USER_CORRECTION"
+    ASSISTANT_IDENTITY = "ASSISTANT_IDENTITY"
+    TECHNICAL_META = "TECHNICAL_META"
+    GAMEPLAY_COACHING = "GAMEPLAY_COACHING"
+    GENERAL_CHAT = "GENERAL_CHAT"
+
+
 class MIStrategy(StrEnum):
     OPEN_QUESTION = "OPEN_QUESTION"
     SIMPLE_REFLECTION = "SIMPLE_REFLECTION"
@@ -108,6 +119,7 @@ class KnowledgeHit(BaseModel):
 
 
 class ReviewerTrace(BaseModel):
+    intent_route: InteractionRoute = InteractionRoute.SUPPORT
     stage: ConversationStage
     risk: RiskAssessment
     focus_topic: FocusTopic | None = None
