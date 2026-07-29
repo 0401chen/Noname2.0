@@ -26,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        VITE_AGENT_NAME: ${VITE_AGENT_NAME:-Noname助手}
     depends_on:
       backend:
         condition: service_healthy
