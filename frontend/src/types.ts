@@ -45,6 +45,10 @@ export interface ActionPlan {
   confidence: number;
   obstacle: string | null;
   coping_plan: string | null;
+  attempts: number;
+  successes: number;
+  status: "active" | "completed" | "paused";
+  last_review: string | null;
 }
 
 export interface ReviewerTrace {
