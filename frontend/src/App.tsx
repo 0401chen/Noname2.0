@@ -17,6 +17,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionPlan,
   ChatResponse,
+  EvaluationSummary,
   Message,
   ReviewerTrace,
 } from "./types";
@@ -67,6 +68,10 @@ function createId(): string {
     : `${Date.now()}-${Math.random()}`;
 }
 
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 const initialMessage: Message = {
   id: "welcome",
   role: "assistant",
@@ -81,6 +86,7 @@ function App() {
   const [quickReplies, setQuickReplies] = useState(starterReplies);
   const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null);
   const [trace, setTrace] = useState<ReviewerTrace | null>(null);
+  const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
   const [reviewerMode, setReviewerMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +96,25 @@ function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!reviewerMode) return;
+    let active = true;
+    void fetch("/api/evaluation/summary")
+      .then((response) => {
+        if (!response.ok) throw new Error("evaluation summary unavailable");
+        return response.json() as Promise<EvaluationSummary>;
+      })
+      .then((data) => {
+        if (active) setEvaluation(data);
+      })
+      .catch(() => {
+        if (active) setEvaluation(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [reviewerMode]);
 
   const balanceItems = useMemo(() => {
     const items: string[] = [];
@@ -395,28 +420,73 @@ function App() {
             )}
           </section>
 
-          {reviewerMode && <ReviewerPanel trace={trace} />}
+          {reviewerMode && <ReviewerPanel trace={trace} evaluation={evaluation} />}
         </aside>
       </main>
     </div>
   );
 }
 
-function ReviewerPanel({ trace }: { trace: ReviewerTrace | null }) {
+function ReviewerPanel({
+  trace,
+  evaluation,
+}: {
+  trace: ReviewerTrace | null;
+  evaluation: EvaluationSummary | null;
+}) {
   return (
     <section className="side-card reviewer-card">
       <div className="card-title">
         <div>
           <span className="eyebrow">评审可解释视图</span>
-          <h3>本轮 AI 决策轨迹</h3>
+          <h3>AI 决策与评测证据</h3>
         </div>
         <BrainCircuit size={20} />
       </div>
 
+      <div className="trace-stack">
+        <span className="eyebrow">系统评测</span>
+        {!evaluation ? (
+          <p className="empty-copy">正在读取本地评测摘要……</p>
+        ) : evaluation.ready ? (
+          <>
+            <TraceRow label="场景通过" value={`${evaluation.passed}/${evaluation.total}`} />
+            <TraceRow label="总通过率" value={formatPercent(evaluation.pass_rate)} />
+            <TraceRow label="高风险路由" value={formatPercent(evaluation.safety_route_rate)} />
+            <TraceRow label="行动卡形成" value={formatPercent(evaluation.action_plan_rate)} />
+            <TraceRow
+              label="平均处理耗时"
+              value={`${evaluation.average_processing_ms.toFixed(1)} ms`}
+            />
+            {evaluation.benchmark_ready && (
+              <>
+                <TraceRow
+                  label="完整系统评分"
+                  value={evaluation.full_system_score?.toFixed(1) ?? "—"}
+                />
+                <TraceRow
+                  label="直接建议基线"
+                  value={evaluation.baseline_score?.toFixed(1) ?? "—"}
+                />
+                <TraceRow
+                  label="评分差值"
+                  value={evaluation.score_delta == null ? "—" : `+${evaluation.score_delta.toFixed(1)}`}
+                  tone="safe"
+                />
+              </>
+            )}
+            <p className="empty-copy">{evaluation.note}</p>
+          </>
+        ) : (
+          <p className="empty-copy">{evaluation.note}</p>
+        )}
+      </div>
+
       {!trace ? (
-        <p className="empty-copy">评审模式开启后再发送一条消息，即可查看状态、策略、检索和审核信息。</p>
+        <p className="empty-copy">再发送一条消息，即可查看本轮状态、策略、检索和审核信息。</p>
       ) : (
         <div className="trace-stack">
+          <span className="eyebrow">本轮决策</span>
           <TraceRow label="会话阶段" value={stageLabels[trace.stage] ?? trace.stage} />
           <TraceRow
             label="风险等级"
