@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from .config import Settings, get_settings
 from .evaluation import EvaluationScenario, OfflineLLM, load_scenarios
+from .llm import LLMClient
+from .paths import resolve_project_root
 from .rag import KnowledgeStore
 from .schemas import ChatRequest, ChatResponse, RiskLevel
 from .service import ConversationService
@@ -334,7 +336,7 @@ async def _run(args: argparse.Namespace, root: Path) -> BenchmarkReport:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[3]
+    root = resolve_project_root()
     parser = argparse.ArgumentParser(description="Compare Re:Play with a direct-advice baseline")
     parser.add_argument(
         "--output",
