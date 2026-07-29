@@ -35,7 +35,7 @@ class FakeClient:
 def test_generated_reply_normalizes_and_deduplicates_quick_replies() -> None:
     reply = GeneratedReply(
         reply="  听起来   你很在意这件事。  ",
-        quick_replies=[" 少困一点。 ", "少困一点", " 先继续聊聊 ", ""],
+        quick_replies=[" 少困一点。 ", "少困一点", " 先继续聊聊 ", "；"],
     )
 
     assert reply.reply == "听起来 你很在意这件事。"
