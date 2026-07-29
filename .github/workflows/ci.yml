@@ -21,6 +21,15 @@ jobs:
         run: ruff check backend
       - name: Test backend
         run: pytest backend/tests -q
+      - name: Run deterministic conversation evaluation
+        run: python -m noname.evaluation
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-evaluation
+          path: evaluation/results/latest.json
+          if-no-files-found: warn
 
   frontend:
     runs-on: ubuntu-latest
