@@ -10,6 +10,7 @@ from .llm import LLMClient
 from .rag import KnowledgeStore
 from .schemas import ChatRequest, ChatResponse, HealthResponse
 from .service import ConversationService
+from .storage import MemorySessionStore, SQLiteSessionStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,14 +18,22 @@ logging.basicConfig(
 )
 
 settings = get_settings()
+knowledge = KnowledgeStore()
+sessions = (
+    SQLiteSessionStore(settings.session_database_path)
+    if settings.use_sqlite_sessions
+    else MemorySessionStore()
+)
 service = ConversationService(
     llm=LLMClient(settings),
-    knowledge=KnowledgeStore(),
+    knowledge=knowledge,
+    sessions=sessions,
+    max_messages=settings.session_max_messages,
 )
 
 app = FastAPI(
     title="重启键 Re:Play API",
-    version="0.1.0",
+    version="0.2.0",
     description="面向青少年的游戏行为心理支持比赛原型。仅用于支持和演示，不进行医学诊断。",
 )
 
@@ -52,6 +61,8 @@ async def health() -> HealthResponse:
         status="ok",
         llm_enabled=service.llm.enabled,
         model=settings.llm_model,
+        storage=service.sessions.kind,
+        knowledge_entries=len(knowledge.entries),
     )
 
 
