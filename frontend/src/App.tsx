@@ -17,6 +17,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionPlan,
   ChatResponse,
+  DemoScenario,
+  DemoScenarioList,
+  Diagnostics,
   EvaluationSummary,
   Message,
   ReviewerTrace,
@@ -72,6 +75,11 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function generationLabel(trace: ReviewerTrace): string {
+  if (trace.risk.level === "HIGH") return "安全策略模板";
+  return trace.fallback_used ? "离线降级模板" : "LLM 实时生成";
+}
+
 const initialMessage: Message = {
   id: "welcome",
   role: "assistant",
@@ -87,6 +95,11 @@ function App() {
   const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null);
   const [trace, setTrace] = useState<ReviewerTrace | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const [demoScenarios, setDemoScenarios] = useState<DemoScenario[]>([]);
+  const [selectedDemoId, setSelectedDemoId] = useState("");
+  const [activeDemo, setActiveDemo] = useState<DemoScenario | null>(null);
+  const [demoNotice, setDemoNotice] = useState("");
   const [reviewerMode, setReviewerMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,8 +111,30 @@ function App() {
   }, [messages, loading]);
 
   useEffect(() => {
+    let active = true;
+    void fetch("/api/demo/scenarios")
+      .then((response) => {
+        if (!response.ok) throw new Error("demo scenarios unavailable");
+        return response.json() as Promise<DemoScenarioList>;
+      })
+      .then((data) => {
+        if (!active) return;
+        setDemoScenarios(data.scenarios);
+        setDemoNotice(data.notice);
+        if (data.scenarios.length > 0) setSelectedDemoId(data.scenarios[0].id);
+      })
+      .catch(() => {
+        if (active) setDemoScenarios([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!reviewerMode) return;
     let active = true;
+
     void fetch("/api/evaluation/summary")
       .then((response) => {
         if (!response.ok) throw new Error("evaluation summary unavailable");
@@ -111,6 +146,19 @@ function App() {
       .catch(() => {
         if (active) setEvaluation(null);
       });
+
+    void fetch("/api/diagnostics")
+      .then((response) => {
+        if (!response.ok) throw new Error("diagnostics unavailable");
+        return response.json() as Promise<Diagnostics>;
+      })
+      .then((data) => {
+        if (active) setDiagnostics(data);
+      })
+      .catch(() => {
+        if (active) setDiagnostics(null);
+      });
+
     return () => {
       active = false;
     };
@@ -187,7 +235,17 @@ function App() {
       setTrace(null);
       setError(null);
       setInput("");
+      setActiveDemo(null);
     }
+  }
+
+  async function activateSelectedDemo() {
+    const scenario = demoScenarios.find((item) => item.id === selectedDemoId);
+    if (!scenario) return;
+    await resetSession();
+    setReviewerMode(true);
+    setActiveDemo(scenario);
+    setInput(scenario.messages[0] ?? "");
   }
 
   function toggleReviewerMode() {
@@ -261,6 +319,51 @@ function App() {
               不需要真实姓名或学校
             </div>
           </div>
+
+          {demoScenarios.length > 0 && (
+            <div className="demo-toolbar">
+              <div className="demo-toolbar-copy">
+                <Gamepad2 size={18} />
+                <div>
+                  <strong>比赛演示场景</strong>
+                  <span>只载入虚构脚本，不会自动发送。</span>
+                </div>
+              </div>
+              <select value={selectedDemoId} onChange={(event) => setSelectedDemoId(event.target.value)}>
+                {demoScenarios.map((scenario) => (
+                  <option key={scenario.id} value={scenario.id}>
+                    {scenario.title}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void activateSelectedDemo()} disabled={loading}>
+                载入场景
+              </button>
+            </div>
+          )}
+
+          {activeDemo && (
+            <div className={`demo-script ${activeDemo.high_risk ? "high-risk" : ""}`}>
+              <div>
+                <span className="eyebrow">当前虚构场景</span>
+                <strong>{activeDemo.title}</strong>
+                <p>{activeDemo.description}</p>
+              </div>
+              <div className="demo-message-list">
+                {activeDemo.messages.map((message, index) => (
+                  <button key={`${activeDemo.id}-${index}`} type="button" onClick={() => void sendMessage(message)}>
+                    第 {index + 1} 句
+                  </button>
+                ))}
+              </div>
+              <div className="demo-highlights">
+                {activeDemo.reviewer_highlights.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              {demoNotice && <small>{demoNotice}</small>}
+            </div>
+          )}
 
           <div className="messages" aria-live="polite">
             {messages.map((message) => (
@@ -420,7 +523,9 @@ function App() {
             )}
           </section>
 
-          {reviewerMode && <ReviewerPanel trace={trace} evaluation={evaluation} />}
+          {reviewerMode && (
+            <ReviewerPanel trace={trace} evaluation={evaluation} diagnostics={diagnostics} />
+          )}
         </aside>
       </main>
     </div>
@@ -430,9 +535,11 @@ function App() {
 function ReviewerPanel({
   trace,
   evaluation,
+  diagnostics,
 }: {
   trace: ReviewerTrace | null;
   evaluation: EvaluationSummary | null;
+  diagnostics: Diagnostics | null;
 }) {
   return (
     <section className="side-card reviewer-card">
@@ -442,6 +549,35 @@ function ReviewerPanel({
           <h3>AI 决策与评测证据</h3>
         </div>
         <BrainCircuit size={20} />
+      </div>
+
+      <div className="trace-stack">
+        <span className="eyebrow">运行状态</span>
+        {!diagnostics ? (
+          <p className="empty-copy">正在读取运行诊断……</p>
+        ) : (
+          <>
+            <TraceRow label="版本" value={diagnostics.version} />
+            <TraceRow
+              label="模型模式"
+              value={diagnostics.llm_enabled ? diagnostics.model : "离线降级"}
+              tone={diagnostics.llm_enabled ? "safe" : "warn"}
+            />
+            <TraceRow label="接口主机" value={diagnostics.provider_host ?? "未配置"} />
+            <TraceRow label="会话存储" value={diagnostics.storage} />
+            <TraceRow label="自动清理" value={`${diagnostics.session_retention_hours} 小时`} />
+            <TraceRow label="知识条目" value={`${diagnostics.knowledge_entries} 条`} />
+            {diagnostics.warnings.length > 0 && (
+              <div className="diagnostic-warnings">
+                {diagnostics.warnings.map((warning) => (
+                  <p key={warning}>
+                    <AlertTriangle size={14} /> {warning}
+                  </p>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="trace-stack">
@@ -518,10 +654,7 @@ function ReviewerPanel({
             value={trace.rag_used ? trace.retrieval_method : "未启用"}
           />
           <TraceRow label="处理耗时" value={`${trace.processing_ms.toFixed(0)} ms`} />
-          <TraceRow
-            label="生成方式"
-            value={trace.fallback_used ? "安全降级模板" : "LLM 实时生成"}
-          />
+          <TraceRow label="生成方式" value={generationLabel(trace)} />
 
           {trace.knowledge_hits.length > 0 && (
             <div className="knowledge-list">
