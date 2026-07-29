@@ -52,6 +52,7 @@ export interface ActionPlan {
 }
 
 export interface ReviewerTrace {
+  intent_route: string;
   stage: string;
   risk: RiskAssessment;
   focus_topic: string | null;
