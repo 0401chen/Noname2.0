@@ -15,6 +15,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_NAME } from "./branding";
+import "./balance.css";
 import type {
   ActionPlan,
   ChatResponse,
@@ -94,7 +95,7 @@ function formatPercent(value: number): string {
 
 function generationLabel(trace: ReviewerTrace): string {
   if (trace.risk.level === "HIGH") return "安全策略模板";
-  return trace.fallback_used ? "离线或审核降级模板" : "LLM 实时生成";
+  return trace.fallback_used ? "规则引导模板或降级回复" : "LLM 实时生成";
 }
 
 function formatScore(value: number | null): string {
@@ -186,16 +187,26 @@ function App() {
   }, [reviewerMode]);
 
   const balanceItems = useMemo(() => {
-    const items: string[] = [];
+    const confirmed: string[] = [];
+    const candidates: string[] = [];
+
     if (trace?.focus_topic) {
-      items.push(focusLabels[trace.focus_topic] ?? trace.focus_topic);
+      confirmed.push(focusLabels[trace.focus_topic] ?? trace.focus_topic);
     }
     for (const need of trace?.psychological_needs ?? []) {
       const label = needLabels[need.name] ?? need.name;
-      if (!items.includes(label)) items.push(label);
+      const target = need.confidence >= 0.8 ? confirmed : candidates;
+      if (!confirmed.includes(label) && !candidates.includes(label)) target.push(label);
     }
-    return items.slice(0, 4);
+
+    return {
+      confirmed: confirmed.slice(0, 4),
+      candidates: candidates.slice(0, 3),
+    };
   }, [trace]);
+
+  const hasBalanceItems =
+    balanceItems.confirmed.length > 0 || balanceItems.candidates.length > 0;
 
   async function sendMessage(rawText: string) {
     const text = rawText.trim();
@@ -467,11 +478,28 @@ function App() {
               <Sparkles size={19} />
             </div>
 
-            {balanceItems.length > 0 ? (
-              <div className="tag-list">
-                {balanceItems.map((item) => (
-                  <span key={item}>{item}</span>
-                ))}
+            {hasBalanceItems ? (
+              <div className="balance-groups">
+                {balanceItems.confirmed.length > 0 && (
+                  <div className="balance-group confirmed">
+                    <small>你已明确提到</small>
+                    <div className="tag-list">
+                      {balanceItems.confirmed.map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {balanceItems.candidates.length > 0 && (
+                  <div className="balance-group candidate">
+                    <small>可能相关，待你确认</small>
+                    <div className="tag-list">
+                      {balanceItems.candidates.map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="empty-copy">聊几句后，这里会出现由你确认的关注点，而不是给你贴标签。</p>
@@ -479,7 +507,7 @@ function App() {
 
             <div className="balance-note">
               <CircleHelp size={16} />
-              系统关注游戏带来的价值和影响，不只统计游戏时长。
+              候选内容只是待确认的方向；你明确否定后，系统会撤回它。
             </div>
           </section>
 
@@ -564,7 +592,10 @@ function ReviewerPanel({
 }) {
   const needSummary =
     trace?.psychological_needs
-      .map((need) => `${needLabels[need.name] ?? need.name} ${(need.confidence * 100).toFixed(0)}%`)
+      .map((need) => {
+        const status = need.confidence >= 0.8 ? "已确认" : "待确认";
+        return `${needLabels[need.name] ?? need.name} ${(need.confidence * 100).toFixed(0)}%（${status}）`;
+      })
       .join(" · ") ?? "";
   const strategySummary =
     trace?.mi_strategies.map((strategy) => strategyLabels[strategy] ?? strategy).join(" · ") ?? "";
