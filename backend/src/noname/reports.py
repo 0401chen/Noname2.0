@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .paths import evaluation_results_dir
+
 
 class EvaluationSummary(BaseModel):
     ready: bool = False
@@ -37,8 +39,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def load_evaluation_summary(root: Path | None = None) -> EvaluationSummary:
-    project_root = root or Path(__file__).resolve().parents[3]
-    results_dir = project_root / "evaluation" / "results"
+    results_dir = root / "evaluation" / "results" if root else evaluation_results_dir()
     evaluation = _read_json(results_dir / "latest.json")
     benchmark = _read_json(results_dir / "benchmark.json")
 
