@@ -94,6 +94,9 @@ class KnowledgeHit(BaseModel):
     summary: str
     suggested_actions: list[str] = Field(default_factory=list)
     score: float = Field(ge=0)
+    bm25_score: float = Field(default=0, ge=0)
+    semantic_score: float = Field(default=0, ge=0, le=1)
+    matched_terms: list[str] = Field(default_factory=list)
     source_name: str | None = None
     source_url: str | None = None
 
@@ -109,9 +112,11 @@ class ReviewerTrace(BaseModel):
     motivation: MotivationState = Field(default_factory=MotivationState)
     mi_strategies: list[MIStrategy] = Field(default_factory=list)
     rag_used: bool = False
+    retrieval_method: str = "none"
     knowledge_hits: list[KnowledgeHit] = Field(default_factory=list)
     quality_flags: list[str] = Field(default_factory=list)
     fallback_used: bool = False
+    processing_ms: float = Field(default=0, ge=0)
 
 
 class SessionState(BaseModel):
@@ -142,3 +147,5 @@ class HealthResponse(BaseModel):
     status: str
     llm_enabled: bool
     model: str
+    storage: str
+    knowledge_entries: int
