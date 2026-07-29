@@ -87,6 +87,34 @@ export interface EvaluationSummary {
   note: string;
 }
 
+export interface DemoScenario {
+  id: string;
+  title: string;
+  description: string;
+  messages: string[];
+  reviewer_highlights: string[];
+  high_risk: boolean;
+}
+
+export interface DemoScenarioList {
+  scenarios: DemoScenario[];
+  notice: string;
+}
+
+export interface Diagnostics {
+  version: string;
+  environment: string;
+  llm_enabled: boolean;
+  model: string;
+  provider_host: string | null;
+  storage: string;
+  session_retention_hours: number;
+  knowledge_entries: number;
+  evaluation_ready: boolean;
+  benchmark_ready: boolean;
+  warnings: string[];
+}
+
 export interface ChatResponse {
   session_id: string;
   reply: string;
