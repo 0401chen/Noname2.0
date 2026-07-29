@@ -83,6 +83,35 @@ class LLMClient:
     def enabled(self) -> bool:
         return self.client is not None
 
+    async def _json_completion(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+    ) -> str:
+        if self.client is None:
+            raise RuntimeError("LLM client is disabled")
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.settings.llm_model,
+                temperature=temperature,
+                response_format={"type": "json_object"},
+                messages=messages,
+            )
+        except Exception as exc:
+            error_text = str(exc).lower()
+            if "response_format" not in error_text and "json" not in error_text:
+                raise
+            logger.info("Provider does not support JSON mode; retrying with prompt-only JSON")
+            response = await self.client.chat.completions.create(
+                model=self.settings.llm_model,
+                temperature=temperature,
+                messages=messages,
+            )
+
+        return response.choices[0].message.content or "{}"
+
     async def analyze(
         self,
         state: SessionState,
@@ -113,18 +142,13 @@ class LLMClient:
                 "REVIEW_AND_ADJUST",
             ],
         }
+        messages = [
+            {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.settings.llm_model,
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-            )
-            content = response.choices[0].message.content or "{}"
+            content = await self._json_completion(messages=messages, temperature=0.1)
             result = ConversationAnalysis.model_validate(_extract_json(content))
             self.last_error = None
             return result
@@ -157,7 +181,6 @@ class LLMClient:
                 "do_not_expose_internal_scores": True,
             },
         }
-
         messages: list[dict[str, str]] = [
             {"role": "system", "content": REPLY_SYSTEM_PROMPT},
             *history,
@@ -165,13 +188,7 @@ class LLMClient:
         ]
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.settings.llm_model,
-                temperature=0.55,
-                response_format={"type": "json_object"},
-                messages=messages,
-            )
-            content = response.choices[0].message.content or "{}"
+            content = await self._json_completion(messages=messages, temperature=0.55)
             result = GeneratedReply.model_validate(_extract_json(content))
             self.last_error = None
             return result
