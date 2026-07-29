@@ -3,6 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from time import perf_counter
 
+from .dialogue_guard import (
+    align_quick_replies,
+    correction_reply,
+    is_neutral_preference,
+    is_user_correction,
+    neutral_preference_reply,
+)
 from .llm import GeneratedReply, LLMClient
 from .mi import heuristic_analysis
 from .quality import review_reply
@@ -30,6 +37,7 @@ CRITICAL_QUALITY_FLAGS = {
     "high_risk_without_safety_focus",
     "deception_or_evasion",
     "internal_trace_leak",
+    "overgeneralized_positive_claim",
     "too_long",
     "too_many_questions",
 }
@@ -52,11 +60,18 @@ class ConversationService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
+        correction = is_user_correction(request.message)
+        neutral_first_turn = is_neutral_preference(request.message) and not state.messages
+
         rule_risk = assess_rule_risk(request.message)
         fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
 
         semantic_analysis = None
-        if rule_risk.level is not RiskLevel.HIGH:
+        if (
+            rule_risk.level is not RiskLevel.HIGH
+            and not correction
+            and not neutral_first_turn
+        ):
             semantic_analysis = await self.llm.analyze(
                 state,
                 request.message,
@@ -67,8 +82,10 @@ class ConversationService:
         if semantic_analysis is not None:
             if analysis.focus_topic is None:
                 analysis.focus_topic = fallback_analysis.focus_topic
-            if not analysis.psychological_needs:
-                analysis.psychological_needs = fallback_analysis.psychological_needs
+            analysis.psychological_needs = self._merge_needs(
+                semantic_analysis,
+                fallback_analysis,
+            )
             if not analysis.emotions:
                 analysis.emotions = fallback_analysis.emotions
             if fallback_analysis.motivation.importance is not None:
@@ -101,6 +118,16 @@ class ConversationService:
         fallback_used = False
         if analysis.risk.level is RiskLevel.HIGH:
             reply, quick_replies = safety_reply(analysis.risk)
+        elif correction:
+            generated = correction_reply()
+            reply = generated.reply
+            quick_replies = generated.quick_replies
+            fallback_used = True
+        elif neutral_first_turn:
+            generated = neutral_preference_reply(request.message)
+            reply = generated.reply
+            quick_replies = generated.quick_replies
+            fallback_used = True
         else:
             generated = await self.llm.generate_reply(
                 state,
@@ -114,11 +141,16 @@ class ConversationService:
             reply = generated.reply
             quick_replies = generated.quick_replies
 
+        quick_replies = align_quick_replies(request.message, analysis, quick_replies)
         quality_flags = review_reply(reply, analysis)
         if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
             generated = self._fallback_reply(analysis, knowledge_hits)
             reply = generated.reply
-            quick_replies = generated.quick_replies
+            quick_replies = align_quick_replies(
+                request.message,
+                analysis,
+                generated.quick_replies,
+            )
             fallback_used = True
             quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
@@ -164,6 +196,32 @@ class ConversationService:
             action_plan=state.action_plan,
             trace=trace,
         )
+
+    @staticmethod
+    def _merge_needs(
+        semantic: ConversationAnalysis,
+        fallback: ConversationAnalysis,
+    ) -> list:
+        """Keep explicit heuristic evidence strong and mark unsupported LLM ideas as candidates."""
+
+        fallback_by_name = {need.name: need for need in fallback.psychological_needs}
+        merged = []
+        seen: set[str] = set()
+        for need in semantic.psychological_needs:
+            if need.name in seen:
+                continue
+            explicit = fallback_by_name.get(need.name)
+            if explicit is not None:
+                need.confidence = max(need.confidence, explicit.confidence)
+            else:
+                need.confidence = min(need.confidence, 0.72)
+            merged.append(need)
+            seen.add(need.name)
+        for need in fallback.psychological_needs:
+            if need.name not in seen:
+                merged.append(need)
+                seen.add(need.name)
+        return sorted(merged, key=lambda item: item.confidence, reverse=True)[:3]
 
     def _fallback_reply(
         self,
@@ -224,10 +282,10 @@ class ConversationService:
         if stage is ConversationStage.ENGAGE:
             return GeneratedReply(
                 reply=(
-                    "听起来你不希望别人一看到你玩游戏，就直接认定你有问题。"
-                    "对你来说，游戏现在更重要的是放松、和朋友在一起，还是获得成就感？"
+                    "你提到了自己在玩游戏。我们先不假设它带来了问题，也不替你猜原因。"
+                    "对你来说，最吸引你的是操作和对抗、完成目标的成就感、和别人一起玩，还是其他部分？"
                 ),
-                quick_replies=["主要是放松", "和朋友一起", "有成就感", "说不清"],
+                quick_replies=["操作和对抗", "完成目标很爽", "和朋友一起", "还有别的"],
             )
 
         if stage is ConversationStage.FOCUS:
@@ -238,7 +296,7 @@ class ConversationService:
                 "family": "游戏引发的家庭冲突",
                 "emotion": "游戏前后的情绪变化",
                 "social": "队友关系和下线边界",
-            }.get(focus, "游戏带来的好处和你不喜欢的影响")
+            }.get(focus, "游戏带来的价值和你不喜欢的影响")
             return GeneratedReply(
                 reply=(
                     f"听起来现在最值得先弄清的是{focus_text}。我们不用一次解决所有事情，"
@@ -251,11 +309,11 @@ class ConversationService:
             social_value = (
                 "又不失去和队友的联系"
                 if needs & {"belonging", "connection"}
-                else "又保留游戏带来的放松"
+                else "又保留游戏对你有价值的部分"
             )
             return GeneratedReply(
                 reply=(
-                    "一方面，游戏确实给了你需要的东西；另一方面，你也不喜欢它现在带来的一些影响。"
+                    "一方面，游戏可能给了你看重的体验；另一方面，你也提到了一些不喜欢的影响。"
                     f"在{social_value}的情况下，你最愿意先改善哪一小点？"
                 ),
                 quick_replies=["第二天别那么困", "少拖一点作业", "更容易停下来", "暂时不想改"],
