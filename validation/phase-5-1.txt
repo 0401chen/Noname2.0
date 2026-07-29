@@ -1,0 +1,1 @@
+CI trigger for 0.5.1 provider analysis compatibility validation.
