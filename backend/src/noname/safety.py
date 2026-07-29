@@ -37,7 +37,9 @@ HIGH_RISK_RULES = (
     ),
     RiskRule(
         "violence_or_abuse",
-        re.compile(r"(被打|家暴|虐待|性侵|强迫我|威胁我|不让我出门)"),
+        re.compile(
+            r"(被打|打我|揍我|殴打我|家暴|虐待|性侵|强迫我|威胁我|威胁不让|不让我出门)"
+        ),
         RiskLevel.HIGH,
     ),
 )
