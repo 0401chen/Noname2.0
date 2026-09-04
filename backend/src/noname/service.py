@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -34,6 +35,35 @@ CRITICAL_QUALITY_FLAGS = {
     "too_many_questions",
 }
 
+_GAME_PREFERENCE_PATTERN = re.compile(
+    r"(喜欢|爱玩|爱打|挺喜欢|很喜欢|就是喜欢).{0,16}(王者荣耀|王者|游戏|手游|网游|开黑)|"
+    r"(王者荣耀|王者|游戏|手游|网游|开黑).{0,16}(喜欢|好玩|有意思)"
+)
+_GAME_IMPACT_PATTERN = re.compile(
+    r"(熬夜|凌晨|困|停不下来|控制不住|下不了线|作业|学习|上课|成绩|拖延|"
+    r"父母|爸妈|妈妈|爸爸|吵架|没收|焦虑|压力|难受|低落|孤独|自责|影响|"
+    r"少玩|戒掉|改变|没问题|没什么|别管我|凭什么)"
+)
+
+
+def _is_neutral_first_turn_game_preference(text: str) -> bool:
+    """Match only a narrow first-turn statement of liking games without stated harm."""
+
+    normalized = text.strip()
+    return bool(_GAME_PREFERENCE_PATTERN.search(normalized)) and not bool(
+        _GAME_IMPACT_PATTERN.search(normalized)
+    )
+
+
+def _neutral_first_turn_reply() -> GeneratedReply:
+    return GeneratedReply(
+        reply=(
+            "听起来你挺喜欢玩游戏。我们先不假设它带来了什么问题。"
+            "对你来说，最吸引你的是操作和对抗、上分或完成目标的成就感、和朋友一起玩，还是其他部分？"
+        ),
+        quick_replies=["操作和对抗", "上分有成就感", "和朋友一起", "还有别的"],
+    )
+
 
 class ConversationService:
     def __init__(
@@ -52,11 +82,14 @@ class ConversationService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
+        neutral_first_turn = (
+            not state.messages and _is_neutral_first_turn_game_preference(request.message)
+        )
         rule_risk = assess_rule_risk(request.message)
         fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
 
         semantic_analysis = None
-        if rule_risk.level is not RiskLevel.HIGH:
+        if rule_risk.level is not RiskLevel.HIGH and not neutral_first_turn:
             semantic_analysis = await self.llm.analyze(
                 state,
                 request.message,
@@ -101,6 +134,11 @@ class ConversationService:
         fallback_used = False
         if analysis.risk.level is RiskLevel.HIGH:
             reply, quick_replies = safety_reply(analysis.risk)
+        elif neutral_first_turn:
+            generated = _neutral_first_turn_reply()
+            reply = generated.reply
+            quick_replies = generated.quick_replies
+            fallback_used = True
         else:
             generated = await self.llm.generate_reply(
                 state,
