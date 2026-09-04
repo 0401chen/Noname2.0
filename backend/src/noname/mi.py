@@ -123,7 +123,7 @@ def _choose_stage(
         return ConversationStage.EVOKE
     if change_talk:
         return ConversationStage.EVOKE
-    if focus_topic or len(state.messages) >= 2:
+    if focus_topic:
         return ConversationStage.FOCUS
     return ConversationStage.ENGAGE
 
