@@ -223,10 +223,7 @@ class ConversationService:
 
         if stage is ConversationStage.ENGAGE:
             return GeneratedReply(
-                reply=(
-                    "你提到了自己挺喜欢游戏。我们先按你现在说的来，不替你假设它一定带来了问题。"
-                    "对你来说，游戏里最吸引你的是什么？"
-                ),
+                reply="你挺喜欢玩游戏。对你来说，游戏里最吸引你的是什么？",
                 quick_replies=["操作和对抗", "上分有成就感", "和朋友一起", "还有别的"],
             )
 
