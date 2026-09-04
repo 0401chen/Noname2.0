@@ -62,6 +62,7 @@ ANALYSIS_SYSTEM_PROMPT = """
 8. 只输出一个 JSON 对象，不输出 Markdown 或解释。
 9. 必须使用以下精确字段名：summary、stage、focus_topic、emotions、psychological_needs、change_talk、sustain_talk、motivation、risk、mi_strategies、rag_required、rag_queries、next_goal。
 10. summary 必须存在；没有新的总结时可复述规则分析中的 summary。
+11. 用户仅表达喜欢游戏、尚未说明困扰、现实影响或改变意愿时，保持 ENGAGE，不凭空推断被误解、孤独、家庭冲突、成瘾或其他心理问题。
 
 分析重点：用户当前情绪、游戏背后的心理需要、关注问题、改变意愿、下一轮目标、是否需要知识检索。
 """.strip()
