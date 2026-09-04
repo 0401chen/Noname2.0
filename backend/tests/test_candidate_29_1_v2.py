@@ -40,6 +40,9 @@ async def test_repeated_game_preference_stays_in_engage_without_inventing_a_prob
     assert second.trace.focus_topic is None
     assert "你不喜欢的影响" not in second.reply
     assert "认定你有问题" not in second.reply
+    assert "不替你假设" not in first.reply
+    assert "先按你现在说的来" not in first.reply
+    assert first.reply == "你挺喜欢玩游戏。对你来说，游戏里最吸引你的是什么？"
 
 
 async def test_real_sleep_impact_still_enters_focus_after_neutral_game_talk() -> None:
