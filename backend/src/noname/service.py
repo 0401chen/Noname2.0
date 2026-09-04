@@ -21,6 +21,7 @@ from .schemas import (
     SessionState,
 )
 from .storage import MemorySessionStore, SessionStore
+from .turn_context import engage_fallback_reply
 
 CRITICAL_QUALITY_FLAGS = {
     "diagnosis_or_label",
@@ -109,14 +110,24 @@ class ConversationService:
                 knowledge_hits,
             )
             if generated is None:
-                generated = self._fallback_reply(analysis, knowledge_hits)
+                generated = self._fallback_reply(
+                    state,
+                    request.message,
+                    analysis,
+                    knowledge_hits,
+                )
                 fallback_used = True
             reply = generated.reply
             quick_replies = generated.quick_replies
 
         quality_flags = review_reply(reply, analysis)
         if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
-            generated = self._fallback_reply(analysis, knowledge_hits)
+            generated = self._fallback_reply(
+                state,
+                request.message,
+                analysis,
+                knowledge_hits,
+            )
             reply = generated.reply
             quick_replies = generated.quick_replies
             fallback_used = True
@@ -167,6 +178,8 @@ class ConversationService:
 
     def _fallback_reply(
         self,
+        state: SessionState,
+        message: str,
         analysis: ConversationAnalysis,
         knowledge_hits: list[KnowledgeHit],
     ) -> GeneratedReply:
@@ -222,10 +235,15 @@ class ConversationService:
         needs = {item.name for item in analysis.psychological_needs}
 
         if stage is ConversationStage.ENGAGE:
-            return GeneratedReply(
-                reply="你挺喜欢玩游戏。对你来说，游戏里最吸引你的是什么？",
-                quick_replies=["操作和对抗", "上分有成就感", "和朋友一起", "还有别的"],
+            previous_assistant = next(
+                (
+                    item.content
+                    for item in reversed(state.messages)
+                    if item.role == "assistant"
+                ),
+                None,
             )
+            return engage_fallback_reply(message, previous_assistant)
 
         if stage is ConversationStage.FOCUS:
             focus_text = {
