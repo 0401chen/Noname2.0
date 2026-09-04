@@ -224,10 +224,10 @@ class ConversationService:
         if stage is ConversationStage.ENGAGE:
             return GeneratedReply(
                 reply=(
-                    "听起来你不希望别人一看到你玩游戏，就直接认定你有问题。"
-                    "对你来说，游戏现在更重要的是放松、和朋友在一起，还是获得成就感？"
+                    "你提到了自己挺喜欢游戏。我们先按你现在说的来，不替你假设它一定带来了问题。"
+                    "对你来说，游戏里最吸引你的是什么？"
                 ),
-                quick_replies=["主要是放松", "和朋友一起", "有成就感", "说不清"],
+                quick_replies=["操作和对抗", "上分有成就感", "和朋友一起", "还有别的"],
             )
 
         if stage is ConversationStage.FOCUS:
