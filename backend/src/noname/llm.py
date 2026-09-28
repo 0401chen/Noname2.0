@@ -480,6 +480,7 @@ class LLMClient:
         safety_state: SafetyConversationState,
     ) -> SafetyTurnUnderstanding | None:
         if self.client is None:
+            self.last_analysis_mode = "disabled"
             return None
 
         history = [
@@ -512,9 +513,11 @@ class LLMClient:
         try:
             content = await self._json_completion(messages=messages, temperature=0)
             result = SafetyTurnUnderstanding.model_validate(_extract_json(content))
+            self.last_analysis_mode = "safety-llm"
             self.last_error = None
             return result
         except Exception as exc:
+            self.last_analysis_mode = "safety-heuristic-fallback"
             self.last_error = f"safety_analysis: {type(exc).__name__}: {exc}"
             logger.warning("LLM safety analysis failed: %s", self.last_error)
             return None
