@@ -8,12 +8,15 @@ from .mi import heuristic_analysis
 from .quality import review_reply
 from .rag import KnowledgeStore
 from .safety import (
+    apply_safety_fallback_context,
     assess_rule_risk,
     carry_forward_safety_risk,
+    contextual_safety_fallback_reply,
+    initialize_safety_state,
     merge_risk,
-    safety_followup_reply,
+    merge_safety_state,
+    safety_can_resolve,
     safety_reply,
-    safety_resolution_confirmed,
     safety_resolution_reply,
 )
 from .schemas import (
@@ -62,21 +65,53 @@ class ConversationService:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
         current_rule_risk = assess_rule_risk(request.message)
-        previous_safety = bool(
-            state.analysis is not None
-            and state.analysis.stage is ConversationStage.SAFETY
-            and state.analysis.risk.level is RiskLevel.HIGH
+        previous_safety = state.safety_state.active
+
+        previous_assistant = next(
+            (
+                item.content
+                for item in reversed(state.messages)
+                if item.role == "assistant"
+            ),
+            None,
         )
+
+        if current_rule_risk.level is RiskLevel.HIGH:
+            state.safety_state = initialize_safety_state(
+                state.safety_state,
+                request.message,
+                current_rule_risk,
+            )
+
+        safety_context_active = previous_safety or current_rule_risk.level is RiskLevel.HIGH
+        if safety_context_active:
+            state.safety_state = apply_safety_fallback_context(
+                state.safety_state,
+                request.message,
+                previous_assistant,
+            )
+            safety_understanding = await self.llm.analyze_safety_turn(
+                state,
+                request.message,
+                state.safety_state,
+            )
+            if safety_understanding is not None:
+                state.safety_state = merge_safety_state(
+                    state.safety_state,
+                    safety_understanding.model_dump(),
+                )
+
         safety_resolved_this_turn = bool(
             previous_safety
             and current_rule_risk.level is not RiskLevel.HIGH
-            and safety_resolution_confirmed(request.message)
+            and safety_can_resolve(state.safety_state)
         )
+        if safety_resolved_this_turn:
+            state.safety_state.active = False
 
         rule_risk = current_rule_risk
         if (
-            previous_safety
-            and not safety_resolved_this_turn
+            state.safety_state.active
             and current_rule_risk.level is not RiskLevel.HIGH
             and state.analysis is not None
         ):
@@ -85,7 +120,11 @@ class ConversationService:
         fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
 
         semantic_analysis = None
-        if rule_risk.level is not RiskLevel.HIGH and not safety_resolved_this_turn:
+        if (
+            not state.safety_state.active
+            and rule_risk.level is not RiskLevel.HIGH
+            and not safety_resolved_this_turn
+        ):
             semantic_analysis = await self.llm.analyze(
                 state,
                 request.message,
@@ -107,11 +146,17 @@ class ConversationService:
                 analysis.next_goal = fallback_analysis.next_goal
 
         analysis.risk = merge_risk(rule_risk, semantic_analysis.risk if semantic_analysis else None)
-        if analysis.risk.level is RiskLevel.HIGH:
+        if state.safety_state.active or analysis.risk.level is RiskLevel.HIGH:
+            state.safety_state.active = True
+            analysis.risk = carry_forward_safety_risk(analysis.risk)
             analysis.stage = ConversationStage.SAFETY
             analysis.next_goal = "确认当前安全并连接现实支持"
             analysis.rag_required = False
             analysis.rag_queries = []
+        elif safety_resolved_this_turn:
+            analysis.risk = current_rule_risk
+            analysis.stage = ConversationStage.ENGAGE
+            analysis.next_goal = "安全状态稳定后，由用户决定是否继续原话题"
 
         knowledge_hits: list[KnowledgeHit] = []
         if analysis.rag_required or analysis.risk.level is RiskLevel.HIGH:
@@ -128,12 +173,22 @@ class ConversationService:
             )
 
         fallback_used = False
-        if analysis.risk.level is RiskLevel.HIGH:
-            reply, quick_replies = safety_followup_reply(
+        if state.safety_state.active:
+            generated = await self.llm.generate_safety_reply(
+                state,
                 request.message,
+                state.safety_state,
                 analysis.risk,
-                continuing=previous_safety,
             )
+            if generated is None:
+                reply, quick_replies = contextual_safety_fallback_reply(
+                    state.safety_state,
+                    analysis.risk,
+                )
+                fallback_used = True
+            else:
+                reply = generated.reply
+                quick_replies = generated.quick_replies
         elif safety_resolved_this_turn:
             reply, quick_replies = safety_resolution_reply()
         else:
@@ -156,18 +211,24 @@ class ConversationService:
 
         quality_flags = review_reply(reply, analysis)
         if CRITICAL_QUALITY_FLAGS.intersection(quality_flags):
-            generated = self._fallback_reply(
-                state,
-                request.message,
-                analysis,
-                knowledge_hits,
-            )
-            reply = generated.reply
-            quick_replies = generated.quick_replies
+            if state.safety_state.active:
+                reply, quick_replies = contextual_safety_fallback_reply(
+                    state.safety_state,
+                    analysis.risk,
+                )
+            else:
+                generated = self._fallback_reply(
+                    state,
+                    request.message,
+                    analysis,
+                    knowledge_hits,
+                )
+                reply = generated.reply
+                quick_replies = generated.quick_replies
             fallback_used = True
             quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
-        if analysis.risk.level is not RiskLevel.HIGH and not safety_resolved_this_turn:
+        if not state.safety_state.active and not safety_resolved_this_turn:
             action_plan = self._maybe_create_action_plan(state, request.message, analysis)
             if action_plan is not None:
                 state.action_plan = action_plan
