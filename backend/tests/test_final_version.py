@@ -1,3 +1,5 @@
+import logging
+
 from noname.llm import GeneratedReply, SafetyTurnUnderstanding
 from noname.rag import KnowledgeStore
 from noname.schemas import ChatRequest
@@ -316,3 +318,59 @@ async def test_offline_safety_fallback_understands_short_no_from_previous_questi
     assert state.safety_state.currently_injuring is False
     assert state.safety_state.immediate_plan is False
     assert "伤害自己的想法" in third.reply
+
+
+
+class SummaryLLM(DisabledLLM):
+    def __init__(self) -> None:
+        self.summary_calls = 0
+        self.last_summary_message_count = 0
+
+    async def summarize_history(self, existing_summary, messages_to_summarize):  # noqa: ANN001
+        self.summary_calls += 1
+        self.last_summary_message_count = len(messages_to_summarize)
+        return (
+            "用户长期提到游戏是日常兴趣；当前没有需要长期保存的额外心理推断。"
+            "后续应继续以用户明确表达为准。"
+        )
+
+
+async def test_long_conversation_compacts_into_rolling_summary() -> None:
+    llm = SummaryLLM()
+    service = ConversationService(llm=llm, knowledge=KnowledgeStore())
+    session_id = "final-version-long-memory"
+
+    for index in range(14):
+        await service.chat(
+            ChatRequest(
+                session_id=session_id,
+                message=f"这是第{index + 1}轮，我今天玩了一会儿游戏",
+                reviewer_mode=True,
+            )
+        )
+
+    state = service.sessions.get_or_create(session_id)
+    assert llm.summary_calls >= 1
+    assert llm.last_summary_message_count > 0
+    assert state.conversation_summary
+    assert state.summary_compactions >= 1
+    assert len(state.messages) <= 16
+
+
+async def test_backend_logs_turn_state_without_logging_user_text(caplog) -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    caplog.set_level(logging.INFO, logger="noname.service")
+
+    await service.chat(
+        ChatRequest(
+            session_id="final-version-log-state",
+            message="这是一句不应该直接出现在状态日志里的测试文本",
+            reviewer_mode=True,
+        )
+    )
+
+    messages = [record.getMessage() for record in caplog.records]
+    turn_lines = [message for message in messages if "TURN_STATE" in message]
+    assert turn_lines
+    assert any("stage=" in message and "risk=" in message and "strategies=" in message for message in turn_lines)
+    assert all("这是一句不应该直接出现在状态日志里的测试文本" not in message for message in turn_lines)
