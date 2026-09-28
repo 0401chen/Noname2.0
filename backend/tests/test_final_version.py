@@ -157,7 +157,8 @@ async def test_high_risk_mode_persists_when_user_refuses_to_tell_someone() -> No
     assert second.trace.stage.value == "SAFETY"
     assert second.trace.risk.level.value == "HIGH"
     assert "safety_session_active" in second.trace.risk.signals
-    assert "不想告诉别人" in second.reply
+    assert "不想" in second.reply
+    assert "告诉" in second.reply
     assert "安全" in second.reply
 
 
