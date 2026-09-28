@@ -7,7 +7,15 @@ from .llm import GeneratedReply, LLMClient
 from .mi import heuristic_analysis
 from .quality import review_reply
 from .rag import KnowledgeStore
-from .safety import assess_rule_risk, merge_risk, safety_reply
+from .safety import (
+    assess_rule_risk,
+    carry_forward_safety_risk,
+    merge_risk,
+    safety_followup_reply,
+    safety_reply,
+    safety_resolution_confirmed,
+    safety_resolution_reply,
+)
 from .schemas import (
     ActionPlan,
     ChatMessage,
@@ -53,11 +61,31 @@ class ConversationService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
-        rule_risk = assess_rule_risk(request.message)
+        current_rule_risk = assess_rule_risk(request.message)
+        previous_safety = bool(
+            state.analysis is not None
+            and state.analysis.stage is ConversationStage.SAFETY
+            and state.analysis.risk.level is RiskLevel.HIGH
+        )
+        safety_resolved_this_turn = bool(
+            previous_safety
+            and current_rule_risk.level is not RiskLevel.HIGH
+            and safety_resolution_confirmed(request.message)
+        )
+
+        rule_risk = current_rule_risk
+        if (
+            previous_safety
+            and not safety_resolved_this_turn
+            and current_rule_risk.level is not RiskLevel.HIGH
+            and state.analysis is not None
+        ):
+            rule_risk = carry_forward_safety_risk(state.analysis.risk)
+
         fallback_analysis = heuristic_analysis(state, request.message, rule_risk)
 
         semantic_analysis = None
-        if rule_risk.level is not RiskLevel.HIGH:
+        if rule_risk.level is not RiskLevel.HIGH and not safety_resolved_this_turn:
             semantic_analysis = await self.llm.analyze(
                 state,
                 request.message,
@@ -101,7 +129,13 @@ class ConversationService:
 
         fallback_used = False
         if analysis.risk.level is RiskLevel.HIGH:
-            reply, quick_replies = safety_reply(analysis.risk)
+            reply, quick_replies = safety_followup_reply(
+                request.message,
+                analysis.risk,
+                continuing=previous_safety,
+            )
+        elif safety_resolved_this_turn:
+            reply, quick_replies = safety_resolution_reply()
         else:
             generated = await self.llm.generate_reply(
                 state,
@@ -133,11 +167,12 @@ class ConversationService:
             fallback_used = True
             quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
-        action_plan = self._maybe_create_action_plan(state, request.message, analysis)
-        if action_plan is not None:
-            state.action_plan = action_plan
-        elif state.action_plan is not None:
-            self._update_action_plan_progress(state.action_plan, request.message)
+        if analysis.risk.level is not RiskLevel.HIGH and not safety_resolved_this_turn:
+            action_plan = self._maybe_create_action_plan(state, request.message, analysis)
+            if action_plan is not None:
+                state.action_plan = action_plan
+            elif state.action_plan is not None:
+                self._update_action_plan_progress(state.action_plan, request.message)
 
         state.messages.append(ChatMessage(role="user", content=request.message))
         state.messages.append(ChatMessage(role="assistant", content=reply))
