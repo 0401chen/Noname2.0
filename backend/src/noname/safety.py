@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .schemas import RiskAssessment, RiskLevel
+from .schemas import RiskAssessment, RiskLevel, SafetyConversationState
 
 
 @dataclass(frozen=True)
@@ -227,3 +227,189 @@ def safety_resolution_reply() -> tuple[str, list[str]]:
         "如果危险感再次变强，请马上重新告诉身边的人或联系当地紧急救援。"
     )
     return reply, ["先休息一下", "继续聊刚才的事", "我想换个话题"]
+
+
+
+def initialize_safety_state(
+    current: SafetyConversationState,
+    text: str,
+    risk: RiskAssessment,
+) -> SafetyConversationState:
+    """Seed persistent safety state from hard rules without lowering uncertainty."""
+
+    state = current.model_copy(deep=True)
+    state.active = True
+    normalized = " ".join(text.strip().split())
+
+    if "self_harm_intent" in risk.signals:
+        state.self_harm_thought = True
+    if "immediate_plan" in risk.signals:
+        state.immediate_plan = True
+    if "cannot_stay_safe" in risk.signals:
+        state.current_safety = False
+
+    if SAFETY_ALONE_PATTERN.search(normalized):
+        state.alone = True
+        state.trusted_person_present = False
+    if re.search(r"(身边有人|有人陪|家人在|父母在|朋友在|老师在)", normalized):
+        state.alone = False
+        state.trusted_person_present = True
+
+    state.last_interpretation = "规则层进入安全优先状态"
+    return state
+
+
+def apply_safety_fallback_context(
+    state: SafetyConversationState,
+    text: str,
+    previous_assistant: str | None,
+) -> SafetyConversationState:
+    """Deterministic backup for short contextual answers when the LLM is unavailable."""
+
+    updated = state.model_copy(deep=True)
+    normalized = " ".join(text.strip().split())
+    previous = previous_assistant or ""
+
+    if SAFETY_REFUSAL_PATTERN.search(normalized):
+        updated.user_refuses_support = True
+
+    if SAFETY_ALONE_PATTERN.search(normalized):
+        updated.alone = True
+        updated.trusted_person_present = False
+
+    if re.search(r"(身边有人|有人陪|家人在|父母在|朋友在|老师在)", normalized):
+        updated.alone = False
+        updated.trusted_person_present = True
+
+    if re.search(r"(已经联系|已经告诉).{0,10}(家人|父母|老师|成年人|朋友|辅导员)", normalized):
+        updated.support_contacted = True
+
+    if re.search(r"(刀|药|绳|危险的东西).{0,8}(放远|拿走|收起来|交给)", normalized):
+        updated.means_removed = True
+
+    affirmative = normalized in {"有", "有的", "嗯", "是", "有人", "在", "有啊"}
+    negative = normalized in {"没有", "没", "不是", "不会", "不"}
+
+    if affirmative:
+        if any(marker in previous for marker in ("身边有没有", "可以马上叫来的人", "有人陪", "身边有人")):
+            updated.alone = False
+            updated.trusted_person_present = True
+        elif any(marker in previous for marker in ("伤害自己的想法", "想伤害自己")):
+            updated.self_harm_thought = True
+        elif any(marker in previous for marker in ("已经想好要怎么做", "准备好要怎么做", "计划")):
+            updated.immediate_plan = True
+
+    if negative:
+        if any(marker in previous for marker in ("伤害自己的想法", "想伤害自己")):
+            updated.self_harm_thought = False
+        if any(marker in previous for marker in ("正在伤害自己", "已经想好要怎么做", "准备好要怎么做")):
+            updated.currently_injuring = False
+            updated.immediate_plan = False
+        if any(marker in previous for marker in ("一个人吗", "现在是一个人")):
+            updated.alone = False
+
+    if SAFETY_TEMP_SAFE_PATTERN.search(normalized):
+        updated.current_safety = True
+
+    if re.search(r"(没有|不会|不打算).{0,8}(伤害自己|自杀|割腕)", normalized):
+        updated.self_harm_thought = False
+        updated.immediate_plan = False
+        updated.currently_injuring = False
+
+    updated.last_interpretation = normalized[:120] or updated.last_interpretation
+    return updated
+
+
+def merge_safety_state(
+    base: SafetyConversationState,
+    updates: dict[str, object] | None,
+) -> SafetyConversationState:
+    """Merge only explicit non-null LLM fields into the persistent state."""
+
+    if not updates:
+        return base
+
+    merged = base.model_copy(deep=True)
+    for field in (
+        "self_harm_thought",
+        "immediate_plan",
+        "currently_injuring",
+        "current_safety",
+        "alone",
+        "trusted_person_present",
+        "support_contacted",
+        "means_removed",
+        "user_refuses_support",
+    ):
+        value = updates.get(field)
+        if isinstance(value, bool):
+            setattr(merged, field, value)
+
+    interpretation = updates.get("interpretation")
+    if isinstance(interpretation, str) and interpretation.strip():
+        merged.last_interpretation = interpretation.strip()[:240]
+
+    merged.active = True
+    return merged
+
+
+def safety_can_resolve(state: SafetyConversationState) -> bool:
+    """Programmatic exit gate; the LLM cannot independently end safety mode."""
+
+    no_immediate_harm = (
+        state.self_harm_thought is False
+        and state.immediate_plan is False
+        and state.currently_injuring is False
+    )
+    connected_support = (
+        state.trusted_person_present is True
+        or state.support_contacted is True
+    )
+    return bool(no_immediate_harm and connected_support)
+
+
+def contextual_safety_fallback_reply(
+    state: SafetyConversationState,
+    risk: RiskAssessment,
+) -> tuple[str, list[str]]:
+    """Choose the next safety step from what has already been confirmed."""
+
+    if risk.immediate_danger or state.current_safety is False:
+        return safety_reply(
+            RiskAssessment(
+                level=RiskLevel.HIGH,
+                signals=risk.signals,
+                immediate_danger=True,
+                source=risk.source,
+            )
+        )
+
+    if state.trusted_person_present is True:
+        if state.currently_injuring is None or state.immediate_plan is None:
+            return (
+                "好，身边现在有人这一点很重要。先尽量和对方待在一起，也把可能伤害到你的东西放远。"
+                "我们再确认一件事：你现在有没有正在伤害自己，或者已经准备马上去做？",
+                ["没有", "有这样的情况", "我不确定"],
+            )
+        if state.self_harm_thought is not False:
+            return (
+                "谢谢你继续告诉我这些。既然身边有人，先不要独处，也继续让对方陪着你。"
+                "你现在还有伤害自己的想法吗？",
+                ["没有了", "还有", "我不确定"],
+            )
+
+    if state.alone is True:
+        return (
+            "你现在是一个人，所以先把现实中的陪伴接上会更重要。请去有其他人的地方，"
+            "并联系一位可信任的成年人来陪你；如果你觉得自己可能马上行动，请联系当地紧急救援服务。",
+            ["我可以去找人", "我已经联系了人", "我暂时安全"],
+        )
+
+    if state.user_refuses_support is True:
+        return (
+            "我知道你现在不想把这些事告诉别人。你不用一次解释很多，可以只告诉一个可信任的人："
+            "“我现在状态不太安全，希望你陪我一下。”在这之前，先尽量不要独处，也把可能伤害到你的东西放远。",
+            ["我身边有人", "我现在一个人", "我暂时安全"],
+        )
+
+    return safety_reply(risk)
