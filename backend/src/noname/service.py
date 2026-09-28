@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -33,6 +34,11 @@ from .schemas import (
 )
 from .storage import MemorySessionStore, SessionStore
 from .turn_context import engage_fallback_reply
+
+logger = logging.getLogger(__name__)
+
+LONG_MEMORY_KEEP_MESSAGES = 16
+LONG_MEMORY_COMPACT_AT = 28
 
 CRITICAL_QUALITY_FLAGS = {
     "diagnosis_or_label",
@@ -243,9 +249,12 @@ class ConversationService:
 
         state.messages.append(ChatMessage(role="user", content=request.message))
         state.messages.append(ChatMessage(role="assistant", content=reply))
+        state.analysis = analysis
+
+        summary_compacted = await self._maybe_compact_long_memory(state)
         if len(state.messages) > self.max_messages:
             state.messages = state.messages[-self.max_messages :]
-        state.analysis = analysis
+
         state.updated_at = datetime.now(timezone.utc)
         self.sessions.save(state)
 
@@ -270,6 +279,16 @@ class ConversationService:
                 processing_ms=processing_ms,
             )
 
+        self._log_turn_state(
+            state=state,
+            analysis=analysis,
+            knowledge_hits=knowledge_hits,
+            fallback_used=fallback_used,
+            quality_flags=quality_flags,
+            processing_ms=processing_ms,
+            summary_compacted=summary_compacted,
+        )
+
         return ChatResponse(
             session_id=state.session_id,
             reply=reply,
@@ -277,6 +296,96 @@ class ConversationService:
             action_plan=state.action_plan,
             trace=trace,
         )
+
+    async def _maybe_compact_long_memory(self, state: SessionState) -> bool:
+        if state.safety_state.active:
+            return False
+        if len(state.messages) < LONG_MEMORY_COMPACT_AT:
+            return False
+
+        summarizer = getattr(self.llm, "summarize_history", None)
+        if not callable(summarizer):
+            return False
+
+        older_messages = state.messages[:-LONG_MEMORY_KEEP_MESSAGES]
+        if not older_messages:
+            return False
+
+        summary = await summarizer(
+            state.conversation_summary,
+            older_messages,
+        )
+        if not summary:
+            return False
+
+        state.conversation_summary = summary
+        state.summary_compactions += 1
+        state.messages = state.messages[-LONG_MEMORY_KEEP_MESSAGES:]
+        logger.info(
+            "LONG_MEMORY session=%s compacted=%s summary_chars=%s recent_messages=%s",
+            state.session_id[:8],
+            state.summary_compactions,
+            len(state.conversation_summary),
+            len(state.messages),
+        )
+        return True
+
+    @staticmethod
+    def _log_turn_state(
+        *,
+        state: SessionState,
+        analysis: ConversationAnalysis,
+        knowledge_hits: list[KnowledgeHit],
+        fallback_used: bool,
+        quality_flags: list[str],
+        processing_ms: float,
+        summary_compacted: bool,
+    ) -> None:
+        strategies = ",".join(strategy.value for strategy in analysis.mi_strategies) or "-"
+        needs = ",".join(item.name for item in analysis.psychological_needs) or "-"
+        plan = (
+            f"{state.action_plan.title}:{state.action_plan.status}"
+            if state.action_plan is not None
+            else "-"
+        )
+        logger.info(
+            "TURN_STATE session=%s stage=%s risk=%s focus=%s strategies=%s needs=%s "
+            "rag=%s hits=%s fallback=%s plan=%s safety=%s summary_chars=%s compacted=%s "
+            "recent_messages=%s quality=%s ms=%.2f",
+            state.session_id[:8],
+            analysis.stage.value,
+            analysis.risk.level.value,
+            analysis.focus_topic or "-",
+            strategies,
+            needs,
+            bool(knowledge_hits),
+            len(knowledge_hits),
+            fallback_used,
+            plan,
+            state.safety_state.active,
+            len(state.conversation_summary),
+            summary_compacted,
+            len(state.messages),
+            ",".join(quality_flags) or "-",
+            processing_ms,
+        )
+        if state.safety_state.active:
+            safety = state.safety_state
+            logger.info(
+                "SAFETY_STATE session=%s thought=%s immediate_plan=%s injuring=%s "
+                "current_safety=%s alone=%s person_present=%s support_contacted=%s "
+                "means_removed=%s refuses_support=%s",
+                state.session_id[:8],
+                safety.self_harm_thought,
+                safety.immediate_plan,
+                safety.currently_injuring,
+                safety.current_safety,
+                safety.alone,
+                safety.trusted_person_present,
+                safety.support_contacted,
+                safety.means_removed,
+                safety.user_refuses_support,
+            )
 
     def _fallback_reply(
         self,
