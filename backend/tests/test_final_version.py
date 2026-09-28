@@ -1,5 +1,9 @@
+import json
 import logging
 
+from httpx import ASGITransport, AsyncClient
+
+import noname.main as main_module
 from noname.llm import GeneratedReply, SafetyTurnUnderstanding
 from noname.rag import KnowledgeStore
 from noname.schemas import ChatRequest
@@ -374,3 +378,46 @@ async def test_backend_logs_turn_state_without_logging_user_text(caplog) -> None
     assert turn_lines
     assert any("stage=" in message and "risk=" in message and "strategies=" in message for message in turn_lines)
     assert all("这是一句不应该直接出现在状态日志里的测试文本" not in message for message in turn_lines)
+
+
+
+class StreamDemoService:
+    async def chat(self, request):  # noqa: ANN001
+        from noname.schemas import ChatResponse
+
+        return ChatResponse(
+            session_id=request.session_id,
+            reply="这是一条经过审核后再流式展示的测试回复。",
+            quick_replies=["继续聊", "重新开始"],
+            action_plan=None,
+            trace=None,
+        )
+
+
+async def test_stream_endpoint_emits_ordered_ndjson_events(monkeypatch) -> None:
+    monkeypatch.setattr(main_module, "service", StreamDemoService())
+
+    transport = ASGITransport(app=main_module.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/chat/stream",
+            json={
+                "session_id": "final-version-stream",
+                "message": "测试流式输出",
+                "reviewer_mode": True,
+            },
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    event_types = [event["type"] for event in events]
+
+    assert event_types[0] == "start"
+    assert "meta" in event_types
+    assert "delta" in event_types
+    assert event_types[-1] == "done"
+
+    streamed_reply = "".join(
+        event["text"] for event in events if event["type"] == "delta"
+    )
+    assert streamed_reply == events[-1]["data"]["reply"]
