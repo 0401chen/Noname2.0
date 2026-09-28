@@ -473,6 +473,28 @@ class ConversationService:
                 coping_plan="先把今晚当成一次观察实验，不要求以后都这样做",
             )
 
+        if any(token in message for token in ("提前20分钟", "提前二十分钟")):
+            duration = (
+                "连续尝试三天"
+                if any(token in message for token in ("试三天", "三天"))
+                else "先尝试一次，再根据结果调整"
+            )
+            return ActionPlan(
+                title="提前二十分钟小实验",
+                behavior="比平常提前二十分钟结束游戏，并观察之后的状态",
+                duration=duration,
+                reason=(
+                    "希望第二天上课更有精神"
+                    if focus == "sleep"
+                    else "希望更容易按自己的计划停下来"
+                    if focus == "stopping"
+                    else "看看这个小调整是否更适合自己的生活节奏"
+                ),
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="到了原本常玩的时间还想继续或再开一局",
+                coping_plan="提前确定最后一局；如果一次没做到，只记录原因，再决定下一次怎么调整",
+            )
+
         if any(token in recent_user_text for token in ("提早结束", "提前结束")) and focus == "sleep":
             return ActionPlan(
                 title="早点结束小实验",
