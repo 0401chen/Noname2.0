@@ -85,11 +85,14 @@ class ConversationService:
 
         safety_context_active = previous_safety or current_rule_risk.level is RiskLevel.HIGH
         if safety_context_active:
-            safety_understanding = await self.llm.analyze_safety_turn(
-                state,
-                request.message,
-                state.safety_state,
-            )
+            safety_understanding = None
+            safety_analyzer = getattr(self.llm, "analyze_safety_turn", None)
+            if callable(safety_analyzer):
+                safety_understanding = await safety_analyzer(
+                    state,
+                    request.message,
+                    state.safety_state,
+                )
             if safety_understanding is not None:
                 state.safety_state = merge_safety_state(
                     state.safety_state,
@@ -174,12 +177,15 @@ class ConversationService:
 
         fallback_used = False
         if state.safety_state.active:
-            generated = await self.llm.generate_safety_reply(
-                state,
-                request.message,
-                state.safety_state,
-                analysis.risk,
-            )
+            generated = None
+            safety_generator = getattr(self.llm, "generate_safety_reply", None)
+            if callable(safety_generator):
+                generated = await safety_generator(
+                    state,
+                    request.message,
+                    state.safety_state,
+                    analysis.risk,
+                )
             if generated is None:
                 reply, quick_replies = contextual_safety_fallback_reply(
                     state.safety_state,
