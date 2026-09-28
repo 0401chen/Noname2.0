@@ -330,8 +330,8 @@ class ConversationService:
         )
         return True
 
-    @staticmethod
     def _log_turn_state(
+        self,
         *,
         state: SessionState,
         analysis: ConversationAnalysis,
@@ -350,14 +350,18 @@ class ConversationService:
         )
         logger.info(
             "TURN_STATE session=%s stage=%s risk=%s focus=%s strategies=%s needs=%s "
-            "rag=%s hits=%s fallback=%s plan=%s safety=%s summary_chars=%s compacted=%s "
-            "recent_messages=%s quality=%s ms=%.2f",
+            "importance=%s confidence=%s goal=%s rag=%s hits=%s fallback=%s plan=%s "
+            "safety=%s summary_chars=%s compacted=%s recent_messages=%s quality=%s "
+            "analysis_mode=%s completion_mode=%s ms=%.2f",
             state.session_id[:8],
             analysis.stage.value,
             analysis.risk.level.value,
             analysis.focus_topic or "-",
             strategies,
             needs,
+            analysis.motivation.importance,
+            analysis.motivation.confidence,
+            analysis.next_goal,
             bool(knowledge_hits),
             len(knowledge_hits),
             fallback_used,
@@ -367,6 +371,8 @@ class ConversationService:
             summary_compacted,
             len(state.messages),
             ",".join(quality_flags) or "-",
+            getattr(self.llm, "last_analysis_mode", "-"),
+            getattr(self.llm, "last_completion_mode", "-"),
             processing_ms,
         )
         if state.safety_state.active:
