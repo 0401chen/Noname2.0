@@ -25,6 +25,10 @@ logging.basicConfig(
 
 APP_VERSION = "0.5.1"
 AGENT_NAME = "Noname助手"
+
+STREAM_CHUNK_SIZE = 2
+STREAM_BASE_DELAY_SECONDS = 0.035
+STREAM_PUNCTUATION_DELAY_SECONDS = 0.085
 settings = get_settings()
 knowledge = KnowledgeStore()
 store_options = {
@@ -152,16 +156,21 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         ) + "\n"
 
         reply = result.reply
-        chunk_size = 5
-        for start in range(0, len(reply), chunk_size):
+        for start in range(0, len(reply), STREAM_CHUNK_SIZE):
+            chunk = reply[start : start + STREAM_CHUNK_SIZE]
             yield json.dumps(
                 {
                     "type": "delta",
-                    "text": reply[start : start + chunk_size],
+                    "text": chunk,
                 },
                 ensure_ascii=False,
             ) + "\n"
-            await asyncio.sleep(0.012)
+            delay = (
+                STREAM_PUNCTUATION_DELAY_SECONDS
+                if chunk and chunk[-1] in "，。！？；：,.!?;:"
+                else STREAM_BASE_DELAY_SECONDS
+            )
+            await asyncio.sleep(delay)
 
         yield json.dumps(
             {
