@@ -48,7 +48,7 @@ function applyBranding(root: Node): void {
 }
 
 export function installBranding(): void {
-  document.title = `${AGENT_NAME} · Re:Play`;
+  document.title = AGENT_NAME;
   applyBranding(document.documentElement);
 
   const observer = new MutationObserver((mutations) => {
