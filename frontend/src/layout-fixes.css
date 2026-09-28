@@ -1,49 +1,14 @@
-@media (min-width: 1081px) {
-  .main-layout {
-    align-items: start;
-  }
-
-  .chat-panel {
-    height: calc(100vh - 169px);
-    min-height: 680px;
-    max-height: 880px;
-  }
-
-  .messages {
-    min-height: 0;
-    max-height: none;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-  }
-
-  .side-panel {
-    position: sticky;
-    top: 139px;
-    max-height: calc(100vh - 154px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-right: 5px;
-    scrollbar-gutter: stable;
-  }
-
-  .side-panel::-webkit-scrollbar,
-  .messages::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .side-panel::-webkit-scrollbar-thumb,
-  .messages::-webkit-scrollbar-thumb {
-    border: 2px solid transparent;
-    border-radius: 999px;
-    background: rgba(74, 119, 98, 0.24);
-    background-clip: padding-box;
-  }
+.messages::-webkit-scrollbar {
+  width: 7px;
 }
 
-button:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-a:focus-visible {
-  outline: 3px solid rgba(53, 122, 97, 0.24);
-  outline-offset: 2px;
+.messages::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(126, 120, 111, 0.28);
+  background-clip: padding-box;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: transparent;
 }
