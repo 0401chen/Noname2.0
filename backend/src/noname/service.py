@@ -85,11 +85,6 @@ class ConversationService:
 
         safety_context_active = previous_safety or current_rule_risk.level is RiskLevel.HIGH
         if safety_context_active:
-            state.safety_state = apply_safety_fallback_context(
-                state.safety_state,
-                request.message,
-                previous_assistant,
-            )
             safety_understanding = await self.llm.analyze_safety_turn(
                 state,
                 request.message,
@@ -100,6 +95,11 @@ class ConversationService:
                     state.safety_state,
                     safety_understanding.model_dump(),
                 )
+            state.safety_state = apply_safety_fallback_context(
+                state.safety_state,
+                request.message,
+                previous_assistant,
+            )
 
         safety_resolved_this_turn = bool(
             previous_safety
