@@ -4,7 +4,7 @@
   }
 
   .chat-panel {
-    height: calc(100vh - 172px);
+    height: calc(100vh - 169px);
     min-height: 680px;
     max-height: 880px;
   }
@@ -18,8 +18,8 @@
 
   .side-panel {
     position: sticky;
-    top: 148px;
-    max-height: calc(100vh - 168px);
+    top: 139px;
+    max-height: calc(100vh - 154px);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-right: 5px;
@@ -35,7 +35,7 @@
   .messages::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 999px;
-    background: rgba(67, 112, 89, 0.28);
+    background: rgba(74, 119, 98, 0.24);
     background-clip: padding-box;
   }
 }
