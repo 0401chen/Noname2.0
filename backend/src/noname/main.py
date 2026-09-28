@@ -122,7 +122,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
         try:
             result = await service.chat(request)
-        except Exception as exc:
+        except Exception:
             logging.exception("Unhandled streaming chat error")
             yield json.dumps(
                 {
