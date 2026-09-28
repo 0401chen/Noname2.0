@@ -133,7 +133,7 @@ class ConversationService:
             fallback_used = True
             quality_flags = [*quality_flags, "unsafe_generation_replaced"]
 
-        action_plan = self._maybe_create_action_plan(request.message, analysis)
+        action_plan = self._maybe_create_action_plan(state, request.message, analysis)
         if action_plan is not None:
             state.action_plan = action_plan
         elif state.action_plan is not None:
@@ -301,6 +301,7 @@ class ConversationService:
 
     def _maybe_create_action_plan(
         self,
+        state: SessionState,
         message: str,
         analysis: ConversationAnalysis,
     ) -> ActionPlan | None:
@@ -316,9 +317,19 @@ class ConversationService:
                 "明天开始",
                 "提前20分钟",
                 "提前二十分钟",
+                "提早结束",
+                "提前结束",
+                "设置闹钟",
+                "设闹钟",
+                "设置提醒",
                 "试三天",
                 "制定一个任务",
                 "制定任务",
+                "制定一个行动",
+                "制定行动",
+                "行动计划",
+                "制定计划",
+                "安排一个行动",
                 "安排时间",
                 "做个计划",
                 "定个计划",
@@ -327,7 +338,27 @@ class ConversationService:
         if not plan_intent:
             return None
 
-        focus = analysis.focus_topic or "general"
+        recent_user_text = " ".join(
+            [
+                item.content
+                for item in state.messages[-10:]
+                if item.role == "user"
+            ]
+            + [message]
+        )
+        focus = analysis.focus_topic or state.analysis.focus_topic if state.analysis else analysis.focus_topic
+        focus = focus or "general"
+
+        if any(token in recent_user_text for token in ("闹钟", "提醒")) and focus in {"sleep", "stopping"}:
+            return ActionPlan(
+                title="早点下线小实验",
+                behavior="今晚设置一个结束游戏的闹钟；闹钟响后结束当前对局，不再开启新一局",
+                duration="先尝试今晚，再观察第二天状态",
+                reason="希望更早结束游戏，让第二天上课更有精神",
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="闹钟响时正好还想继续玩或再开一局",
+                coping_plan="把闹钟当作最后一局提醒；没按计划停下也只记录原因，下一次再调整",
+            )
 
         if any(token in message for token in ("今晚先不玩", "今天晚上先不玩", "今晚不玩")):
             return ActionPlan(
@@ -338,6 +369,17 @@ class ConversationService:
                 confidence=analysis.motivation.confidence or 6,
                 obstacle="晚上到了平常游戏时间又想打开游戏",
                 coping_plan="先把今晚当成一次观察实验，不要求以后都这样做",
+            )
+
+        if any(token in recent_user_text for token in ("提早结束", "提前结束")) and focus == "sleep":
+            return ActionPlan(
+                title="早点结束小实验",
+                behavior="今晚比平常更早结束游戏，并观察第二天的精神状态",
+                duration="先尝试今晚，再决定是否继续",
+                reason="希望第二天上课更有精神",
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="到时间后还想继续玩一局",
+                coping_plan="提前确定结束点；如果没做到，只记录是什么让自己继续玩了",
             )
 
         plans = {
