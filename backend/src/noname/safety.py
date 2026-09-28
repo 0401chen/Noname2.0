@@ -237,7 +237,11 @@ def initialize_safety_state(
 ) -> SafetyConversationState:
     """Seed persistent safety state from hard rules without lowering uncertainty."""
 
-    state = current.model_copy(deep=True)
+    state = (
+        current.model_copy(deep=True)
+        if current.active
+        else SafetyConversationState(active=True)
+    )
     state.active = True
     normalized = " ".join(text.strip().split())
 
@@ -387,13 +391,13 @@ def contextual_safety_fallback_reply(
     if state.trusted_person_present is True:
         if state.currently_injuring is None or state.immediate_plan is None:
             return (
-                "好，身边现在有人这一点很重要。先尽量和对方待在一起，也把可能伤害到你的东西放远。"
+                "好，身边现在有人这一点很重要。安全上先尽量和对方待在一起，也把可能伤害到你的东西放远。"
                 "我们再确认一件事：你现在有没有正在伤害自己，或者已经准备马上去做？",
                 ["没有", "有这样的情况", "我不确定"],
             )
         if state.self_harm_thought is not False:
             return (
-                "谢谢你继续告诉我这些。既然身边有人，先不要独处，也继续让对方陪着你。"
+                "谢谢你继续告诉我这些。为了安全，既然身边有人，先不要独处，也继续让对方陪着你。"
                 "你现在还有伤害自己的想法吗？",
                 ["没有了", "还有", "我不确定"],
             )
