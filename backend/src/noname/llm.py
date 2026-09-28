@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from .analysis_adapter import normalize_analysis_payload
 from .config import Settings
-from .schemas import ConversationAnalysis, KnowledgeHit, SessionState
+from .schemas import (
+    ConversationAnalysis,
+    KnowledgeHit,
+    RiskAssessment,
+    SafetyConversationState,
+    SessionState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,19 @@ class GeneratedReply(BaseModel):
             if item and item not in normalized:
                 normalized.append(item)
         return normalized[:4]
+
+
+class SafetyTurnUnderstanding(BaseModel):
+    self_harm_thought: bool | None = None
+    immediate_plan: bool | None = None
+    currently_injuring: bool | None = None
+    current_safety: bool | None = None
+    alone: bool | None = None
+    trusted_person_present: bool | None = None
+    support_contacted: bool | None = None
+    means_removed: bool | None = None
+    user_refuses_support: bool | None = None
+    interpretation: str = ""
 
 
 class ProviderCheckResult(BaseModel):
@@ -65,6 +84,42 @@ ANALYSIS_SYSTEM_PROMPT = """
 11. 用户仅表达喜欢游戏、尚未说明困扰、现实影响或改变意愿时，保持 ENGAGE，不凭空推断被误解、孤独、家庭冲突、成瘾或其他心理问题。
 
 分析重点：用户当前情绪、游戏背后的心理需要、关注问题、改变意愿、下一轮目标、是否需要知识检索。
+""".strip()
+
+SAFETY_ANALYSIS_SYSTEM_PROMPT = """
+你是 Noname助手 Re:Play 的安全会话理解器。当前会话已经进入安全优先状态。
+
+你的任务只是结合最近多轮对话，理解用户当前这句话在上下文中回答了什么，并更新结构化安全信息。
+不要生成对用户的回复，不要判断是否可以退出安全模式，不要降低已有风险。
+
+规则：
+- 短回答如“有”“没有”“嗯”“是”“不想”必须结合上一条助手问题理解。
+- 只填写用户明确表达或上下文可以直接确定的字段；不确定时输出 null。
+- 不把“我暂时安全”自动解释成“没有自伤想法”。
+- 不把“身边有人”自动解释成“已经联系专业帮助”。
+- 不诊断，不猜测动机。
+- 只输出一个 JSON 对象。
+
+字段：
+self_harm_thought、immediate_plan、currently_injuring、current_safety、alone、
+trusted_person_present、support_contacted、means_removed、user_refuses_support、interpretation。
+布尔字段只能是 true、false 或 null。
+""".strip()
+
+SAFETY_REPLY_SYSTEM_PROMPT = """
+你是“Noname助手 Re:Play”的安全优先回复生成器。当前会话已由程序锁定为高风险安全模式。
+
+你必须遵守：
+- 先准确回应用户当前这句话以及最近上下文，不要机械重复上一轮。
+- 已经确认的信息不要反复询问；优先补齐最关键的未知安全信息。
+- 暂停游戏时长、戒游戏、行动实验、学习计划等普通话题。
+- 不诊断，不责备，不制造依赖，不承诺保密或现实救援。
+- 如果用户可能马上行动、正在受伤或无法保证安全，明确建议远离危险物品/地点、不要独处、联系可信任成年人，并联系当地紧急救援服务。
+- 每轮最多一个主要安全问题，也可以没有问题。
+- 不提供具体自伤方法或细节。
+- 不自行宣布“已经安全”或退出安全模式；程序会决定。
+- 回复一般 60—180 个中文字。
+- 只输出 JSON：reply 与 quick_replies；quick_replies 为 2—4 个简短选项。
 """.strip()
 
 REPLY_SYSTEM_PROMPT = """
@@ -298,7 +353,7 @@ class LLMClient:
             self.last_analysis_mode = "disabled"
             return None
 
-        history = [item.model_dump(mode="json") for item in state.messages[-8:]]
+        history = [item.model_dump(mode="json") for item in state.messages[-16:]]
         payload = {
             "history": history,
             "user_message": message,
@@ -365,6 +420,94 @@ class LLMClient:
             logger.warning("LLM analysis failed: %s", self.last_error)
             return None
 
+    async def analyze_safety_turn(
+        self,
+        state: SessionState,
+        message: str,
+        safety_state: SafetyConversationState,
+    ) -> SafetyTurnUnderstanding | None:
+        if self.client is None:
+            return None
+
+        history = [
+            {"role": item.role, "content": item.content}
+            for item in state.messages[-16:]
+        ]
+        payload = {
+            "history": history,
+            "current_user_message": message,
+            "known_safety_state": safety_state.model_dump(mode="json"),
+            "required_output_contract": {
+                "self_harm_thought": None,
+                "immediate_plan": None,
+                "currently_injuring": None,
+                "current_safety": None,
+                "alone": None,
+                "trusted_person_present": None,
+                "support_contacted": None,
+                "means_removed": None,
+                "user_refuses_support": None,
+                "interpretation": "简短说明这句话在上下文中回答了什么",
+            },
+        }
+        messages = [
+            {"role": "system", "content": SAFETY_ANALYSIS_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+
+        try:
+            content = await self._json_completion(messages=messages, temperature=0)
+            result = SafetyTurnUnderstanding.model_validate(_extract_json(content))
+            self.last_error = None
+            return result
+        except Exception as exc:
+            self.last_error = f"safety_analysis: {type(exc).__name__}: {exc}"
+            logger.warning("LLM safety analysis failed: %s", self.last_error)
+            return None
+
+    async def generate_safety_reply(
+        self,
+        state: SessionState,
+        message: str,
+        safety_state: SafetyConversationState,
+        risk: RiskAssessment,
+    ) -> GeneratedReply | None:
+        if self.client is None:
+            return None
+
+        history = [
+            {"role": item.role, "content": item.content}
+            for item in state.messages[-16:]
+        ]
+        payload = {
+            "current_user_message": message,
+            "safety_state": safety_state.model_dump(mode="json"),
+            "risk": risk.model_dump(mode="json"),
+            "requirements": {
+                "remain_in_safety_mode": True,
+                "do_not_repeat_confirmed_questions": True,
+                "ask_at_most_one_safety_question": True,
+                "prioritize_real_world_support": True,
+                "do_not_discuss_game_behavior_change": True,
+                "do_not_expose_internal_state": True,
+            },
+        }
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": SAFETY_REPLY_SYSTEM_PROMPT},
+            *history,
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+
+        try:
+            content = await self._json_completion(messages=messages, temperature=0.2)
+            result = GeneratedReply.model_validate(_extract_json(content))
+            self.last_error = None
+            return result
+        except Exception as exc:
+            self.last_error = f"safety_reply: {type(exc).__name__}: {exc}"
+            logger.warning("LLM safety reply failed: %s", self.last_error)
+            return None
+
     async def generate_reply(
         self,
         state: SessionState,
@@ -376,7 +519,7 @@ class LLMClient:
             return None
 
         history: list[dict[str, str]] = [
-            {"role": item.role, "content": item.content} for item in state.messages[-8:]
+            {"role": item.role, "content": item.content} for item in state.messages[-16:]
         ]
         payload = {
             "current_user_message": message,
