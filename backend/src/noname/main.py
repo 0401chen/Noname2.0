@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .config import get_settings
 from .demo import DemoScenarioList, list_demo_scenarios
@@ -107,6 +110,75 @@ async def chat(request: ChatRequest) -> ChatResponse:
             status_code=500,
             detail="会话处理暂时失败，请稍后重试。",
         ) from exc
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    async def event_stream():
+        yield json.dumps(
+            {"type": "start", "session_id": request.session_id},
+            ensure_ascii=False,
+        ) + "\n"
+
+        try:
+            result = await service.chat(request)
+        except Exception as exc:
+            logging.exception("Unhandled streaming chat error")
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "message": "会话处理暂时失败，请稍后重试。",
+                },
+                ensure_ascii=False,
+            ) + "\n"
+            return
+
+        yield json.dumps(
+            {
+                "type": "meta",
+                "session_id": result.session_id,
+                "action_plan": (
+                    result.action_plan.model_dump(mode="json")
+                    if result.action_plan is not None
+                    else None
+                ),
+                "trace": (
+                    result.trace.model_dump(mode="json")
+                    if result.trace is not None
+                    else None
+                ),
+            },
+            ensure_ascii=False,
+        ) + "\n"
+
+        reply = result.reply
+        chunk_size = 5
+        for start in range(0, len(reply), chunk_size):
+            yield json.dumps(
+                {
+                    "type": "delta",
+                    "text": reply[start : start + chunk_size],
+                },
+                ensure_ascii=False,
+            ) + "\n"
+            await asyncio.sleep(0.012)
+
+        yield json.dumps(
+            {
+                "type": "done",
+                "data": result.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+        ) + "\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.delete("/api/sessions/{session_id}")
