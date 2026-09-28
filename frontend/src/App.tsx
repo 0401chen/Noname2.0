@@ -68,6 +68,7 @@ function App() {
   const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null);
   const [trace, setTrace] = useState<ReviewerTrace | null>(null);
   const [loading, setLoading] = useState(false);
+  const [streamingStarted, setStreamingStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -119,14 +120,19 @@ function App() {
     if (!text || loading) return;
 
     const userMessage: Message = { id: createId(), role: "user", content: text };
+    const assistantMessageId = createId();
+    let assistantAdded = false;
+    let completed = false;
+
     setMessages((current) => [...current, userMessage]);
     setInput("");
     setQuickReplies([]);
     setLoading(true);
+    setStreamingStarted(false);
     setError(null);
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -136,23 +142,107 @@ function App() {
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error("服务暂时没有响应");
       }
 
-      const data = (await response.json()) as ChatResponse;
-      setMessages((current) => [
-        ...current,
-        { id: createId(), role: "assistant", content: data.reply },
-      ]);
-      setQuickReplies(data.quick_replies);
-      setActionPlan(data.action_plan);
-      setTrace(data.trace);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      const processLine = (line: string) => {
+        if (!line.trim()) return;
+
+        const event = JSON.parse(line) as
+          | { type: "start"; session_id: string }
+          | {
+              type: "meta";
+              session_id: string;
+              action_plan: ActionPlan | null;
+              trace: ReviewerTrace | null;
+            }
+          | { type: "delta"; text: string }
+          | { type: "done"; data: ChatResponse }
+          | { type: "error"; message: string };
+
+        if (event.type === "meta") {
+          setActionPlan(event.action_plan);
+          setTrace(event.trace);
+          return;
+        }
+
+        if (event.type === "delta") {
+          if (!assistantAdded) {
+            assistantAdded = true;
+            setStreamingStarted(true);
+            setMessages((current) => [
+              ...current,
+              { id: assistantMessageId, role: "assistant", content: event.text },
+            ]);
+          } else {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, content: message.content + event.text }
+                  : message,
+              ),
+            );
+          }
+          return;
+        }
+
+        if (event.type === "done") {
+          completed = true;
+          if (!assistantAdded) {
+            assistantAdded = true;
+            setMessages((current) => [
+              ...current,
+              { id: assistantMessageId, role: "assistant", content: event.data.reply },
+            ]);
+          } else {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, content: event.data.reply }
+                  : message,
+              ),
+            );
+          }
+          setQuickReplies(event.data.quick_replies);
+          setActionPlan(event.data.action_plan);
+          setTrace(event.data.trace);
+          return;
+        }
+
+        if (event.type === "error") {
+          throw new Error(event.message);
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          processLine(line);
+        }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) processLine(buffer);
+
+      if (!completed) {
+        throw new Error("流式响应未完整结束");
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "发送失败");
       setQuickReplies(["重新发送", "先缓一缓"]);
     } finally {
       setLoading(false);
+      setStreamingStarted(false);
     }
   }
 
@@ -242,7 +332,7 @@ function App() {
               </article>
             ))}
 
-            {loading && (
+            {loading && !streamingStarted && (
               <article className="message assistant">
                 <div className="avatar" aria-hidden="true">
                   <Bot size={19} />
