@@ -1,3 +1,4 @@
+from noname.llm import GeneratedReply, SafetyTurnUnderstanding
 from noname.rag import KnowledgeStore
 from noname.schemas import ChatRequest
 from noname.service import ConversationService
@@ -10,6 +11,12 @@ class DisabledLLM:
         return None
 
     async def generate_reply(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    async def analyze_safety_turn(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    async def generate_safety_reply(self, *args, **kwargs):  # noqa: ANN002, ANN003
         return None
 
 
@@ -214,3 +221,97 @@ async def test_high_risk_mode_exits_only_after_explicit_safety_confirmation() ->
     assert resolved.trace.risk.level.value != "HIGH"
     assert "安全情况" in resolved.reply
     assert "游戏" not in resolved.reply
+
+
+
+class ContextSafetyLLM(DisabledLLM):
+    def __init__(self) -> None:
+        self.safety_history_lengths: list[int] = []
+
+    async def analyze_safety_turn(self, state, message, safety_state):  # noqa: ANN001
+        self.safety_history_lengths.append(len(state.messages))
+        if message.strip() == "有":
+            return SafetyTurnUnderstanding(
+                trusted_person_present=True,
+                alone=False,
+                interpretation="用户在回答上一轮关于身边是否有人陪伴的问题",
+            )
+        return None
+
+    async def generate_safety_reply(self, state, message, safety_state, risk):  # noqa: ANN001
+        if safety_state.trusted_person_present is True:
+            return GeneratedReply(
+                reply=(
+                    "好，安全上先和身边这个人待在一起。你刚才的“有”我理解为身边现在有人陪着，"
+                    "所以不用再重复确认这一点。接下来只需要确认你现在有没有正在伤害自己或准备马上行动。"
+                ),
+                quick_replies=["没有", "有这样的情况", "我不确定"],
+            )
+        return None
+
+
+async def test_safety_llm_reads_previous_turn_for_short_answer() -> None:
+    llm = ContextSafetyLLM()
+    service = ConversationService(llm=llm, knowledge=KnowledgeStore())
+    session_id = "final-version-safety-short-context"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我现在就想割腕",
+            reviewer_mode=True,
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="有",
+            reviewer_mode=True,
+        )
+    )
+
+    state = service.sessions.get_or_create(session_id)
+    assert len(llm.safety_history_lengths) == 2
+    assert llm.safety_history_lengths[0] == 0
+    assert llm.safety_history_lengths[1] >= 2
+    assert state.safety_state.active is True
+    assert state.safety_state.trusted_person_present is True
+    assert state.safety_state.alone is False
+    assert response.trace is not None
+    assert response.trace.stage.value == "SAFETY"
+    assert "不用再重复确认" in response.reply
+
+
+async def test_offline_safety_fallback_understands_short_no_from_previous_question() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-safety-short-no"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我想割腕",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我身边有人",
+            reviewer_mode=True,
+        )
+    )
+    third = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="没有",
+            reviewer_mode=True,
+        )
+    )
+
+    state = service.sessions.get_or_create(session_id)
+    assert third.trace is not None
+    assert third.trace.stage.value == "SAFETY"
+    assert state.safety_state.trusted_person_present is True
+    assert state.safety_state.currently_injuring is False
+    assert state.safety_state.immediate_plan is False
+    assert "伤害自己的想法" in third.reply
