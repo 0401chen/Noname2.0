@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   Bot,
-  BrainCircuit,
   CheckCircle2,
   CircleHelp,
   Gamepad2,
@@ -15,16 +14,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_NAME } from "./branding";
-import type {
-  ActionPlan,
-  ChatResponse,
-  DemoScenario,
-  DemoScenarioList,
-  Diagnostics,
-  EvaluationSummary,
-  Message,
-  ReviewerTrace,
-} from "./types";
+import type { ActionPlan, ChatResponse, Message, ReviewerTrace } from "./types";
 
 const starterReplies = [
   "最近总是玩到很晚",
@@ -33,20 +23,11 @@ const starterReplies = [
   "游戏只是让我放松",
 ];
 
-const stageLabels: Record<string, string> = {
-  ENGAGE: "建立关系",
-  FOCUS: "确定重点",
-  EVOKE: "唤起动机",
-  PLAN: "形成计划",
-  REVIEW: "复盘调整",
-  SAFETY: "安全响应",
-};
-
 const focusLabels: Record<string, string> = {
   sleep: "睡眠",
   stopping: "停止困难",
   school: "学习与拖延",
-  family: "家庭冲突",
+  family: "家庭沟通",
   emotion: "情绪压力",
   social: "队友与社交",
 };
@@ -60,22 +41,6 @@ const needLabels: Record<string, string> = {
   connection: "连接与被需要",
 };
 
-const strategyLabels: Record<string, string> = {
-  OPEN_QUESTION: "开放式提问",
-  SIMPLE_REFLECTION: "简单反映",
-  COMPLEX_REFLECTION: "复杂反映",
-  AFFIRMATION: "肯定",
-  SUMMARY: "总结",
-  DOUBLE_SIDED_REFLECTION: "双面反映",
-  AUTONOMY_SUPPORT: "支持自主",
-  ELICIT_CHANGE_TALK: "引出改变语言",
-  READINESS_RULER: "改变意愿标尺",
-  CONFIDENCE_RULER: "信心标尺",
-  ASK_PERMISSION: "征求许可",
-  ACTION_PLANNING: "行动计划",
-  REVIEW_AND_ADJUST: "复盘调整",
-};
-
 const planStatusLabels: Record<ActionPlan["status"], string> = {
   active: "进行中",
   completed: "已完成",
@@ -86,19 +51,6 @@ function createId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
-}
-
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function generationLabel(trace: ReviewerTrace): string {
-  if (trace.risk.level === "HIGH") return "安全策略模板";
-  return trace.fallback_used ? "离线或审核降级模板" : "LLM 实时生成";
-}
-
-function formatScore(value: number | null): string {
-  return value == null ? "本轮未明确" : `${value}/10`;
 }
 
 const initialMessage: Message = {
@@ -115,75 +67,13 @@ function App() {
   const [quickReplies, setQuickReplies] = useState(starterReplies);
   const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null);
   const [trace, setTrace] = useState<ReviewerTrace | null>(null);
-  const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
-  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
-  const [demoScenarios, setDemoScenarios] = useState<DemoScenario[]>([]);
-  const [selectedDemoId, setSelectedDemoId] = useState("");
-  const [activeDemo, setActiveDemo] = useState<DemoScenario | null>(null);
-  const [demoNotice, setDemoNotice] = useState("");
-  const [reviewerMode, setReviewerMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ageGroup, setAgeGroup] = useState("15-16");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
-
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/demo/scenarios")
-      .then((response) => {
-        if (!response.ok) throw new Error("demo scenarios unavailable");
-        return response.json() as Promise<DemoScenarioList>;
-      })
-      .then((data) => {
-        if (!active) return;
-        setDemoScenarios(data.scenarios);
-        setDemoNotice(data.notice);
-        if (data.scenarios.length > 0) setSelectedDemoId(data.scenarios[0].id);
-      })
-      .catch(() => {
-        if (active) setDemoScenarios([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!reviewerMode) return;
-    let active = true;
-
-    void fetch("/api/evaluation/summary")
-      .then((response) => {
-        if (!response.ok) throw new Error("evaluation summary unavailable");
-        return response.json() as Promise<EvaluationSummary>;
-      })
-      .then((data) => {
-        if (active) setEvaluation(data);
-      })
-      .catch(() => {
-        if (active) setEvaluation(null);
-      });
-
-    void fetch("/api/diagnostics")
-      .then((response) => {
-        if (!response.ok) throw new Error("diagnostics unavailable");
-        return response.json() as Promise<Diagnostics>;
-      })
-      .then((data) => {
-        if (active) setDiagnostics(data);
-      })
-      .catch(() => {
-        if (active) setDiagnostics(null);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [reviewerMode]);
 
   const balanceItems = useMemo(() => {
     const items: string[] = [];
@@ -195,6 +85,30 @@ function App() {
       if (!items.includes(label)) items.push(label);
     }
     return items.slice(0, 4);
+  }, [trace]);
+
+  const insightItems = useMemo(() => {
+    const items: string[] = [];
+    const focus = trace?.focus_topic;
+
+    if (focus === "sleep") items.push("游戏时间正在影响第二天的休息和精神状态");
+    if (focus === "stopping") items.push("你正在关注能不能按自己的计划停下来");
+    if (focus === "school") items.push("游戏和学习状态之间的影响已经被你注意到");
+    if (focus === "family") items.push("你在意游戏之外，也在意自主感和家庭沟通");
+    if (focus === "emotion") items.push("你正在观察游戏和情绪变化之间的关系");
+    if (focus === "social") items.push("队友关系和下线边界都在影响你的选择");
+
+    for (const need of trace?.psychological_needs ?? []) {
+      const label = needLabels[need.name] ?? need.name;
+      const sentence = `游戏对你来说也包含“${label}”这一部分`;
+      if (!items.includes(sentence)) items.push(sentence);
+    }
+
+    if ((trace?.change_talk.length ?? 0) > 0) {
+      items.push("你已经开始说出自己想改变或尝试的理由");
+    }
+
+    return items.slice(0, 3);
   }, [trace]);
 
   async function sendMessage(rawText: string) {
@@ -215,8 +129,7 @@ function App() {
         body: JSON.stringify({
           session_id: sessionId,
           message: text,
-          age_group: ageGroup,
-          reviewer_mode: reviewerMode,
+          reviewer_mode: true,
         }),
       });
 
@@ -256,22 +169,7 @@ function App() {
       setTrace(null);
       setError(null);
       setInput("");
-      setActiveDemo(null);
     }
-  }
-
-  async function activateSelectedDemo() {
-    const scenario = demoScenarios.find((item) => item.id === selectedDemoId);
-    if (!scenario) return;
-    await resetSession();
-    setReviewerMode(true);
-    setActiveDemo(scenario);
-    setInput(scenario.messages[0] ?? "");
-  }
-
-  function toggleReviewerMode() {
-    setReviewerMode((current) => !current);
-    setTrace(null);
   }
 
   return (
@@ -291,35 +189,16 @@ function App() {
         </div>
 
         <div className="top-actions">
-          <label className="age-select">
-            <span>年龄段</span>
-            <select value={ageGroup} onChange={(event) => setAgeGroup(event.target.value)}>
-              <option value="12-14">12—14岁</option>
-              <option value="15-16">15—16岁</option>
-              <option value="17-18">17—18岁</option>
-              <option value="unspecified">不想填写</option>
-            </select>
-          </label>
-
-          <button
-            className={`review-toggle ${reviewerMode ? "active" : ""}`}
-            type="button"
-            onClick={toggleReviewerMode}
-          >
-            <BrainCircuit size={17} />
-            {reviewerMode ? "评审模式已开" : "评审模式"}
-          </button>
-
           <button className="icon-button" type="button" onClick={() => void resetSession()}>
             <RefreshCw size={18} />
-            <span>重置</span>
+            <span>重新开始</span>
           </button>
         </div>
       </header>
 
       <div className="prototype-notice">
         <ShieldCheck size={16} />
-        <span>比赛原型：提供心理支持与风险识别，不进行医学诊断，也不能替代专业帮助。</span>
+        <span>提供心理支持与风险识别，不进行医学诊断，也不能替代专业帮助。</span>
         <button
           type="button"
           onClick={() => void sendMessage("我现在感觉很危险，需要马上获得帮助")}
@@ -340,51 +219,6 @@ function App() {
               不需要真实姓名或学校
             </div>
           </div>
-
-          {demoScenarios.length > 0 && (
-            <div className="demo-toolbar">
-              <div className="demo-toolbar-copy">
-                <Gamepad2 size={18} />
-                <div>
-                  <strong>比赛演示场景</strong>
-                  <span>只载入虚构脚本，不会自动发送。</span>
-                </div>
-              </div>
-              <select value={selectedDemoId} onChange={(event) => setSelectedDemoId(event.target.value)}>
-                {demoScenarios.map((scenario) => (
-                  <option key={scenario.id} value={scenario.id}>
-                    {scenario.title}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => void activateSelectedDemo()} disabled={loading}>
-                载入场景
-              </button>
-            </div>
-          )}
-
-          {activeDemo && (
-            <div className={`demo-script ${activeDemo.high_risk ? "high-risk" : ""}`}>
-              <div>
-                <span className="eyebrow">当前虚构场景</span>
-                <strong>{activeDemo.title}</strong>
-                <p>{activeDemo.description}</p>
-              </div>
-              <div className="demo-message-list">
-                {activeDemo.messages.map((message, index) => (
-                  <button key={`${activeDemo.id}-${index}`} type="button" onClick={() => void sendMessage(message)}>
-                    第 {index + 1} 句
-                  </button>
-                ))}
-              </div>
-              <div className="demo-highlights">
-                {activeDemo.reviewer_highlights.map((item) => (
-                  <span key={item}>{item}</span>
-                ))}
-              </div>
-              {demoNotice && <small>{demoNotice}</small>}
-            </div>
-          )}
 
           <div className="messages" aria-live="polite">
             {messages.map((message) => (
@@ -443,7 +277,7 @@ function App() {
                   void sendMessage(input);
                 }
               }}
-              placeholder="可以说说最近一次玩到停不下来的情况……"
+              placeholder="可以说说最近一次让你在意的游戏体验……"
               maxLength={3000}
               disabled={loading}
             />
@@ -457,12 +291,12 @@ function App() {
           </form>
         </section>
 
-        <aside className="side-panel" aria-label="平衡地图与评审信息">
+        <aside className="side-panel" aria-label="对话进展">
           <section className="side-card balance-card">
             <div className="card-title">
               <div>
-                <span className="eyebrow">我的平衡地图</span>
-                <h3>目前对话中的重点</h3>
+                <span className="eyebrow">目前关注</span>
+                <h3>这次对话正在谈什么</h3>
               </div>
               <Sparkles size={19} />
             </div>
@@ -474,19 +308,41 @@ function App() {
                 ))}
               </div>
             ) : (
-              <p className="empty-copy">聊几句后，这里会出现由你确认的关注点，而不是给你贴标签。</p>
+              <p className="empty-copy">聊几句后，这里会逐渐出现你自己提到的关注点。</p>
             )}
 
             <div className="balance-note">
               <CircleHelp size={16} />
-              系统关注游戏带来的价值和影响，不只统计游戏时长。
+              只根据你已经说出的内容整理，不给你贴标签。
             </div>
+          </section>
+
+          <section className="side-card balance-card">
+            <div className="card-title">
+              <div>
+                <span className="eyebrow">我正在发现</span>
+                <h3>从对话里慢慢看清的事情</h3>
+              </div>
+              <Sparkles size={19} />
+            </div>
+
+            {insightItems.length > 0 ? (
+              <div className="plan-grid">
+                {insightItems.map((item) => (
+                  <div key={item}>
+                    <dd>{item}</dd>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">现在还不用急着下结论，先把你的真实体验聊清楚。</p>
+            )}
           </section>
 
           <section className="side-card plan-card">
             <div className="card-title">
               <div>
-                <span className="eyebrow">我的实验</span>
+                <span className="eyebrow">我的小实验</span>
                 <h3>{actionPlan?.title ?? "还没有制定行动"}</h3>
               </div>
               {actionPlan ? <CheckCircle2 size={20} /> : <Gamepad2 size={20} />}
@@ -507,16 +363,12 @@ function App() {
                   <dd>{actionPlan.reason}</dd>
                 </div>
                 <div>
-                  <dt>把握程度</dt>
-                  <dd>{actionPlan.confidence}/10</dd>
-                </div>
-                <div>
                   <dt>当前状态</dt>
                   <dd>{planStatusLabels[actionPlan.status]}</dd>
                 </div>
                 <div>
                   <dt>复盘记录</dt>
-                  <dd>{actionPlan.successes} 次完成 / {actionPlan.attempts} 次记录</dd>
+                  <dd>{actionPlan.successes} 次有效尝试 / {actionPlan.attempts} 次记录</dd>
                 </div>
                 {actionPlan.obstacle && (
                   <div>
@@ -526,7 +378,7 @@ function App() {
                 )}
                 {actionPlan.coping_plan && (
                   <div>
-                    <dt>如果遇到困难</dt>
+                    <dt>遇到困难时</dt>
                     <dd>{actionPlan.coping_plan}</dd>
                   </div>
                 )}
@@ -539,206 +391,12 @@ function App() {
               </dl>
             ) : (
               <p className="empty-copy">
-                系统不会替你安排任务。只有当你愿意尝试时，这里才会形成一个足够小的三天实验。
+                当你自己提出一个想尝试的改变时，这里会把它整理成一个可观察的小实验。
               </p>
             )}
           </section>
-
-          {reviewerMode && (
-            <ReviewerPanel trace={trace} evaluation={evaluation} diagnostics={diagnostics} />
-          )}
         </aside>
       </main>
-    </div>
-  );
-}
-
-function ReviewerPanel({
-  trace,
-  evaluation,
-  diagnostics,
-}: {
-  trace: ReviewerTrace | null;
-  evaluation: EvaluationSummary | null;
-  diagnostics: Diagnostics | null;
-}) {
-  const needSummary =
-    trace?.psychological_needs
-      .map((need) => `${needLabels[need.name] ?? need.name} ${(need.confidence * 100).toFixed(0)}%`)
-      .join(" · ") ?? "";
-  const strategySummary =
-    trace?.mi_strategies.map((strategy) => strategyLabels[strategy] ?? strategy).join(" · ") ?? "";
-
-  return (
-    <section className="side-card reviewer-card">
-      <div className="card-title">
-        <div>
-          <span className="eyebrow">评审可解释视图</span>
-          <h3>AI 决策与评测证据</h3>
-        </div>
-        <BrainCircuit size={20} />
-      </div>
-
-      <div className="trace-stack">
-        <span className="eyebrow">运行状态</span>
-        {!diagnostics ? (
-          <p className="empty-copy">正在读取运行诊断……</p>
-        ) : (
-          <>
-            <TraceRow label="版本" value={diagnostics.version} />
-            <TraceRow
-              label="模型模式"
-              value={diagnostics.llm_enabled ? diagnostics.model : "离线降级"}
-              tone={diagnostics.llm_enabled ? "safe" : "warn"}
-            />
-            <TraceRow label="接口主机" value={diagnostics.provider_host ?? "未配置"} />
-            <TraceRow label="会话存储" value={diagnostics.storage} />
-            <TraceRow label="自动清理" value={`${diagnostics.session_retention_hours} 小时`} />
-            <TraceRow label="知识条目" value={`${diagnostics.knowledge_entries} 条`} />
-            {diagnostics.warnings.length > 0 && (
-              <div className="diagnostic-warnings">
-                {diagnostics.warnings.map((warning) => (
-                  <p key={warning}>
-                    <AlertTriangle size={14} /> {warning}
-                  </p>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="trace-stack">
-        <span className="eyebrow">系统评测</span>
-        {!evaluation ? (
-          <p className="empty-copy">正在读取本地评测摘要……</p>
-        ) : evaluation.ready ? (
-          <>
-            <TraceRow label="场景通过" value={`${evaluation.passed}/${evaluation.total}`} />
-            <TraceRow label="总通过率" value={formatPercent(evaluation.pass_rate)} />
-            <TraceRow label="高风险路由" value={formatPercent(evaluation.safety_route_rate)} />
-            <TraceRow label="行动卡形成" value={formatPercent(evaluation.action_plan_rate)} />
-            <TraceRow
-              label="平均处理耗时"
-              value={`${evaluation.average_processing_ms.toFixed(1)} ms`}
-            />
-            {evaluation.benchmark_ready && (
-              <>
-                <TraceRow
-                  label="完整系统评分"
-                  value={evaluation.full_system_score?.toFixed(1) ?? "—"}
-                />
-                <TraceRow
-                  label="直接建议基线"
-                  value={evaluation.baseline_score?.toFixed(1) ?? "—"}
-                />
-                <TraceRow
-                  label="评分差值"
-                  value={evaluation.score_delta == null ? "—" : `+${evaluation.score_delta.toFixed(1)}`}
-                  tone="safe"
-                />
-              </>
-            )}
-            <p className="empty-copy">{evaluation.note}</p>
-          </>
-        ) : (
-          <p className="empty-copy">{evaluation.note}</p>
-        )}
-      </div>
-
-      {!trace ? (
-        <p className="empty-copy">再发送一条消息，即可查看本轮状态、策略、检索和审核信息。</p>
-      ) : (
-        <div className="trace-stack">
-          <span className="eyebrow">本轮决策</span>
-          <TraceRow label="会话阶段" value={stageLabels[trace.stage] ?? trace.stage} />
-          <TraceRow
-            label="风险等级"
-            value={trace.risk.level}
-            tone={trace.risk.level === "HIGH" ? "danger" : trace.risk.level === "CONCERN" ? "warn" : "safe"}
-          />
-          <TraceRow
-            label="风险信号"
-            value={trace.risk.signals.length ? trace.risk.signals.join(" · ") : "未触发规则信号"}
-          />
-          <TraceRow
-            label="关注问题"
-            value={trace.focus_topic ? focusLabels[trace.focus_topic] ?? trace.focus_topic : "尚未聚焦"}
-          />
-          <TraceRow label="心理需要" value={needSummary || "本轮未明确推断"} />
-          <TraceRow label="改变意愿" value={formatScore(trace.motivation.importance)} />
-          <TraceRow label="行动信心" value={formatScore(trace.motivation.confidence)} />
-          <TraceRow label="MI 策略" value={strategySummary || "安全流程优先"} />
-          <TraceRow
-            label="改变语言"
-            value={trace.change_talk.length ? trace.change_talk.join("；") : "本轮未明确出现"}
-          />
-          <TraceRow
-            label="维持语言"
-            value={trace.sustain_talk.length ? trace.sustain_talk.join("；") : "本轮未明确出现"}
-          />
-          <TraceRow
-            label="知识检索"
-            value={trace.rag_used ? `${trace.knowledge_hits.length} 条命中` : "本轮无需检索"}
-          />
-          <TraceRow
-            label="检索方法"
-            value={trace.rag_used ? trace.retrieval_method : "未启用"}
-          />
-          <TraceRow label="处理耗时" value={`${trace.processing_ms.toFixed(0)} ms`} />
-          <TraceRow label="生成方式" value={generationLabel(trace)} />
-
-          {trace.knowledge_hits.length > 0 && (
-            <div className="knowledge-list">
-              <span>检索依据</span>
-              {trace.knowledge_hits.map((hit) => (
-                <article key={hit.id}>
-                  <strong>{hit.title}</strong>
-                  <p>{hit.summary}</p>
-                  <small>
-                    综合 {hit.score.toFixed(2)} · BM25 {hit.bm25_score.toFixed(2)} · n-gram {hit.semantic_score.toFixed(2)}
-                    {hit.matched_terms.length ? ` · 命中：${hit.matched_terms.join("、")}` : ""}
-                  </small>
-                  {hit.source_url && (
-                    <a href={hit.source_url} target="_blank" rel="noreferrer">
-                      {hit.source_name ?? "查看来源"}
-                    </a>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-
-          <div className="quality-line">
-            {trace.quality_flags.length === 0 ? (
-              <>
-                <CheckCircle2 size={16} /> 规则审核通过
-              </>
-            ) : (
-              <>
-                <AlertTriangle size={16} /> {trace.quality_flags.join(" · ")}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function TraceRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "safe" | "warn" | "danger";
-}) {
-  return (
-    <div className="trace-row">
-      <span>{label}</span>
-      <strong className={tone ? `tone-${tone}` : undefined}>{value}</strong>
     </div>
   );
 }
