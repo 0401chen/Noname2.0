@@ -143,6 +143,8 @@ class SessionState(BaseModel):
     session_id: str
     age_group: str | None = None
     messages: list[ChatMessage] = Field(default_factory=list)
+    conversation_summary: str = ""
+    summary_compactions: int = Field(default=0, ge=0)
     analysis: ConversationAnalysis | None = None
     action_plan: ActionPlan | None = None
     safety_state: SafetyConversationState = Field(default_factory=SafetyConversationState)
