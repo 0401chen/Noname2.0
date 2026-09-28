@@ -723,3 +723,81 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+.safety-active-notice {
+  color: #7f3838;
+  background: #fff0f0;
+  border-bottom-color: #efcaca;
+  font-weight: 700;
+}
+
+.safety-chat {
+  border-color: #e5b8b8;
+  box-shadow: 0 16px 48px rgba(168, 66, 66, 0.11);
+}
+
+.safety-priority-card {
+  border-color: #e6bcbc;
+  background:
+    linear-gradient(145deg, rgba(255, 250, 250, 0.99), rgba(253, 234, 234, 0.98));
+}
+
+.safety-priority-card .card-title {
+  color: var(--danger);
+}
+
+.safety-priority-card .eyebrow {
+  color: var(--danger);
+}
+
+.safety-priority-copy {
+  margin: 16px 0 0;
+  color: #673f3f;
+  line-height: 1.75;
+  font-size: 13px;
+}
+
+.safety-step-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.safety-step-list div {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 11px 12px;
+  border: 1px solid #edcccc;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.safety-step-list strong {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: white;
+  background: var(--danger);
+  font-size: 12px;
+}
+
+.safety-step-list span {
+  color: #5f4444;
+  line-height: 1.65;
+  font-size: 12px;
+}
+
+.safety-state-note {
+  margin-top: 16px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  color: #704848;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.65;
+}
