@@ -1,14 +1,16 @@
 import {
   AlertTriangle,
-  Bot,
+  ArrowUp,
   CheckCircle2,
   CircleHelp,
-  Gamepad2,
+  Compass,
+  Lightbulb,
   Loader2,
-  RefreshCw,
-  Send,
+  MessageCircle,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
+  Target,
   UserRound,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -270,12 +272,12 @@ function App() {
       <header className="topbar">
         <div className="brand-block">
           <div className="brand-icon" aria-hidden="true">
-            <Gamepad2 size={24} />
+            <MessageCircle size={23} strokeWidth={2.1} />
+            <Sparkles className="brand-spark" size={12} strokeWidth={2.2} />
           </div>
           <div>
             <div className="brand-line">
               <h1>{AGENT_NAME}</h1>
-              <span>Re:Play</span>
             </div>
             <p>不是逼你离开游戏，而是帮你重新拿回选择权。</p>
           </div>
@@ -283,7 +285,7 @@ function App() {
 
         <div className="top-actions">
           <button className="icon-button" type="button" onClick={() => void resetSession()}>
-            <RefreshCw size={18} />
+            <RotateCcw size={17} />
             <span>重新开始</span>
           </button>
         </div>
@@ -323,7 +325,11 @@ function App() {
             {messages.map((message) => (
               <article key={message.id} className={`message ${message.role}`}>
                 <div className="avatar" aria-hidden="true">
-                  {message.role === "assistant" ? <Bot size={19} /> : <UserRound size={19} />}
+                  {message.role === "assistant" ? (
+                    <MessageCircle size={18} strokeWidth={2} />
+                  ) : (
+                    <UserRound size={18} strokeWidth={2} />
+                  )}
                 </div>
                 <div className="message-body">
                   <span>{message.role === "assistant" ? AGENT_NAME : "我"}</span>
@@ -335,7 +341,7 @@ function App() {
             {loading && !streamingStarted && (
               <article className="message assistant">
                 <div className="avatar" aria-hidden="true">
-                  <Bot size={19} />
+                  <MessageCircle size={18} strokeWidth={2} />
                 </div>
                 <div className="message-body loading-message">
                   <span>{AGENT_NAME}</span>
@@ -383,8 +389,8 @@ function App() {
             <div className="composer-footer">
               <span>决定权始终在你。按 Enter 发送，Shift + Enter 换行。</span>
               <button type="submit" disabled={!input.trim() || loading}>
-                <Send size={17} />
-                发送
+                <ArrowUp size={17} strokeWidth={2.4} />
+                <span className="send-label">发送</span>
               </button>
             </div>
           </form>
@@ -432,7 +438,7 @@ function App() {
                     <span className="eyebrow">目前关注</span>
                     <h3>这次对话正在谈什么</h3>
                   </div>
-                  <Sparkles size={19} />
+                  <Compass size={19} strokeWidth={2} />
                 </div>
 
                 {balanceItems.length > 0 ? (
@@ -457,7 +463,7 @@ function App() {
                     <span className="eyebrow">我正在发现</span>
                     <h3>从对话里慢慢看清的事情</h3>
                   </div>
-                  <Sparkles size={19} />
+                  <Lightbulb size={19} strokeWidth={2} />
                 </div>
 
                 {insightItems.length > 0 ? (
@@ -479,7 +485,11 @@ function App() {
                     <span className="eyebrow">我的小实验</span>
                     <h3>{actionPlan?.title ?? "还没有制定行动"}</h3>
                   </div>
-                  {actionPlan ? <CheckCircle2 size={20} /> : <Gamepad2 size={20} />}
+                  {actionPlan ? (
+                    <CheckCircle2 size={20} strokeWidth={2} />
+                  ) : (
+                    <Target size={20} strokeWidth={2} />
+                  )}
                 </div>
 
                 {actionPlan ? (
