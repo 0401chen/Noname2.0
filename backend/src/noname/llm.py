@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .analysis_adapter import normalize_analysis_payload
 from .config import Settings
 from .schemas import (
+    ChatMessage,
     ConversationAnalysis,
     KnowledgeHit,
     RiskAssessment,
@@ -45,6 +46,10 @@ class GeneratedReply(BaseModel):
         return normalized[:4]
 
 
+class ConversationSummaryResult(BaseModel):
+    summary: str = Field(min_length=1, max_length=1800)
+
+
 class SafetyTurnUnderstanding(BaseModel):
     self_harm_thought: bool | None = None
     immediate_plan: bool | None = None
@@ -66,6 +71,19 @@ class ProviderCheckResult(BaseModel):
     latency_ms: float = Field(ge=0)
     error: str | None = None
 
+
+SUMMARY_SYSTEM_PROMPT = """
+你是 Noname助手 Re:Play 的长期会话摘要器。你的任务是把较早的对话压缩成可供后续模型继续使用的长期记忆。
+
+必须遵守：
+- 只保留用户明确说过、对后续对话有帮助的信息，不凭空补充心理动机或诊断。
+- 优先保留：用户在意的问题、游戏带来的价值、现实影响、用户自己的改变理由、明确偏好、对助手的纠正、已经尝试过的行动、行动结果、尚未解决的困难。
+- 已有摘要和新加入的旧对话可能重叠，要合并去重。
+- 不记录真实姓名、学校、联系方式等不必要身份信息。
+- 高风险内容只做简洁事实记录，不复述具体伤害方法；当前安全状态由独立安全状态机维护。
+- 摘要应紧凑、稳定，控制在约 600—1200 个中文字以内。
+- 只输出 JSON：{"summary":"..."}。
+""".strip()
 
 ANALYSIS_SYSTEM_PROMPT = """
 你是 Noname助手 Re:Play 的会话分析器，面向 12—18 岁青少年。你的任务不是诊断疾病，而是为后续回复生成结构化会话状态。
@@ -344,6 +362,36 @@ class LLMClient:
                 error=f"{type(exc).__name__}: {exc}",
             )
 
+    async def summarize_history(
+        self,
+        existing_summary: str,
+        messages_to_summarize: list[ChatMessage],
+    ) -> str | None:
+        if self.client is None or not messages_to_summarize:
+            return None
+
+        payload = {
+            "existing_summary": existing_summary or None,
+            "older_messages": [
+                {"role": item.role, "content": item.content}
+                for item in messages_to_summarize
+            ],
+        }
+        messages = [
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+
+        try:
+            content = await self._json_completion(messages=messages, temperature=0.1)
+            result = ConversationSummaryResult.model_validate(_extract_json(content))
+            self.last_error = None
+            return result.summary.strip()
+        except Exception as exc:
+            self.last_error = f"summary: {type(exc).__name__}: {exc}"
+            logger.warning("LLM conversation summary failed: %s", self.last_error)
+            return None
+
     async def analyze(
         self,
         state: SessionState,
@@ -356,6 +404,7 @@ class LLMClient:
 
         history = [item.model_dump(mode="json") for item in state.messages[-16:]]
         payload = {
+            "conversation_summary": state.conversation_summary or None,
             "history": history,
             "user_message": message,
             "rule_and_heuristic_result": rule_analysis.model_dump(mode="json"),
@@ -435,6 +484,7 @@ class LLMClient:
             for item in state.messages[-16:]
         ]
         payload = {
+            "conversation_summary": state.conversation_summary or None,
             "history": history,
             "current_user_message": message,
             "known_safety_state": safety_state.model_dump(mode="json"),
@@ -481,6 +531,7 @@ class LLMClient:
             for item in state.messages[-16:]
         ]
         payload = {
+            "conversation_summary": state.conversation_summary or None,
             "current_user_message": message,
             "safety_state": safety_state.model_dump(mode="json"),
             "risk": risk.model_dump(mode="json"),
@@ -523,6 +574,7 @@ class LLMClient:
             {"role": item.role, "content": item.content} for item in state.messages[-16:]
         ]
         payload = {
+            "conversation_summary": state.conversation_summary or None,
             "current_user_message": message,
             "analysis": analysis.model_dump(mode="json"),
             "knowledge": [hit.model_dump(mode="json") for hit in knowledge_hits],
