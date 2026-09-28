@@ -87,6 +87,9 @@ function App() {
     return items.slice(0, 4);
   }, [trace]);
 
+  const safetyActive =
+    trace?.stage === "SAFETY" || trace?.risk.level === "HIGH";
+
   const insightItems = useMemo(() => {
     const items: string[] = [];
     const focus = trace?.focus_topic;
@@ -196,19 +199,25 @@ function App() {
         </div>
       </header>
 
-      <div className="prototype-notice">
-        <ShieldCheck size={16} />
-        <span>提供心理支持与风险识别，不进行医学诊断，也不能替代专业帮助。</span>
-        <button
-          type="button"
-          onClick={() => void sendMessage("我现在感觉很危险，需要马上获得帮助")}
-        >
-          我现在需要帮助
-        </button>
+      <div className={`prototype-notice ${safetyActive ? "safety-active-notice" : ""}`}>
+        {safetyActive ? <AlertTriangle size={16} /> : <ShieldCheck size={16} />}
+        <span>
+          {safetyActive
+            ? "安全优先模式已开启：先确认你当前是否安全，并连接现实中的支持。"
+            : "提供心理支持与风险识别，不进行医学诊断，也不能替代专业帮助。"}
+        </span>
+        {!safetyActive && (
+          <button
+            type="button"
+            onClick={() => void sendMessage("我现在感觉很危险，需要马上获得帮助")}
+          >
+            我现在需要帮助
+          </button>
+        )}
       </div>
 
       <main className="main-layout">
-        <section className="chat-panel" aria-label="对话区">
+        <section className={`chat-panel ${safetyActive ? "safety-chat" : ""}`} aria-label="对话区">
           <div className="chat-heading">
             <div>
               <span className="eyebrow">匿名对话</span>
@@ -291,110 +300,147 @@ function App() {
           </form>
         </section>
 
-        <aside className="side-panel" aria-label="对话进展">
-          <section className="side-card balance-card">
-            <div className="card-title">
-              <div>
-                <span className="eyebrow">目前关注</span>
-                <h3>这次对话正在谈什么</h3>
-              </div>
-              <Sparkles size={19} />
-            </div>
-
-            {balanceItems.length > 0 ? (
-              <div className="tag-list">
-                {balanceItems.map((item) => (
-                  <span key={item}>{item}</span>
-                ))}
-              </div>
-            ) : (
-              <p className="empty-copy">聊几句后，这里会逐渐出现你自己提到的关注点。</p>
-            )}
-
-            <div className="balance-note">
-              <CircleHelp size={16} />
-              只根据你已经说出的内容整理，不给你贴标签。
-            </div>
-          </section>
-
-          <section className="side-card balance-card">
-            <div className="card-title">
-              <div>
-                <span className="eyebrow">我正在发现</span>
-                <h3>从对话里慢慢看清的事情</h3>
-              </div>
-              <Sparkles size={19} />
-            </div>
-
-            {insightItems.length > 0 ? (
-              <div className="plan-grid">
-                {insightItems.map((item) => (
-                  <div key={item}>
-                    <dd>{item}</dd>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="empty-copy">现在还不用急着下结论，先把你的真实体验聊清楚。</p>
-            )}
-          </section>
-
-          <section className="side-card plan-card">
-            <div className="card-title">
-              <div>
-                <span className="eyebrow">我的小实验</span>
-                <h3>{actionPlan?.title ?? "还没有制定行动"}</h3>
-              </div>
-              {actionPlan ? <CheckCircle2 size={20} /> : <Gamepad2 size={20} />}
-            </div>
-
-            {actionPlan ? (
-              <dl className="plan-grid">
+        <aside className="side-panel" aria-label={safetyActive ? "安全优先状态" : "对话进展"}>
+          {safetyActive ? (
+            <section className="side-card safety-priority-card">
+              <div className="card-title">
                 <div>
-                  <dt>我要尝试</dt>
-                  <dd>{actionPlan.behavior}</dd>
+                  <span className="eyebrow">安全优先</span>
+                  <h3>当前先确认你的安全</h3>
                 </div>
-                <div>
-                  <dt>持续时间</dt>
-                  <dd>{actionPlan.duration}</dd>
-                </div>
-                <div>
-                  <dt>我的原因</dt>
-                  <dd>{actionPlan.reason}</dd>
-                </div>
-                <div>
-                  <dt>当前状态</dt>
-                  <dd>{planStatusLabels[actionPlan.status]}</dd>
-                </div>
-                <div>
-                  <dt>复盘记录</dt>
-                  <dd>{actionPlan.successes} 次有效尝试 / {actionPlan.attempts} 次记录</dd>
-                </div>
-                {actionPlan.obstacle && (
-                  <div>
-                    <dt>可能的困难</dt>
-                    <dd>{actionPlan.obstacle}</dd>
-                  </div>
-                )}
-                {actionPlan.coping_plan && (
-                  <div>
-                    <dt>遇到困难时</dt>
-                    <dd>{actionPlan.coping_plan}</dd>
-                  </div>
-                )}
-                {actionPlan.last_review && (
-                  <div>
-                    <dt>最近一次复盘</dt>
-                    <dd>{actionPlan.last_review}</dd>
-                  </div>
-                )}
-              </dl>
-            ) : (
-              <p className="empty-copy">
-                当你自己提出一个想尝试的改变时，这里会把它整理成一个可观察的小实验。
+                <AlertTriangle size={20} />
+              </div>
+
+              <p className="safety-priority-copy">
+                系统已暂停普通的游戏建议和行动实验。接下来的重点是确认你现在是否安全，并尽快连接现实中的可信任支持。
               </p>
-            )}
-          </section>
+
+              <div className="safety-step-list">
+                <div>
+                  <strong>1</strong>
+                  <span>先远离可能伤害到你的东西或危险位置。</span>
+                </div>
+                <div>
+                  <strong>2</strong>
+                  <span>尽量不要独处，去有其他人的地方。</span>
+                </div>
+                <div>
+                  <strong>3</strong>
+                  <span>联系可信任的成年人；如果可能马上行动，请联系当地紧急救援。</span>
+                </div>
+              </div>
+
+              <div className="safety-state-note">
+                只有在你明确说明当前安全，并且没有立即伤害自己的打算或已经有人陪伴后，系统才会退出安全优先模式。
+              </div>
+            </section>
+          ) : (
+            <>
+              <section className="side-card balance-card">
+                <div className="card-title">
+                  <div>
+                    <span className="eyebrow">目前关注</span>
+                    <h3>这次对话正在谈什么</h3>
+                  </div>
+                  <Sparkles size={19} />
+                </div>
+
+                {balanceItems.length > 0 ? (
+                  <div className="tag-list">
+                    {balanceItems.map((item) => (
+                      <span key={item}>{item}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-copy">聊几句后，这里会逐渐出现你自己提到的关注点。</p>
+                )}
+
+                <div className="balance-note">
+                  <CircleHelp size={16} />
+                  只根据你已经说出的内容整理，不给你贴标签。
+                </div>
+              </section>
+
+              <section className="side-card balance-card">
+                <div className="card-title">
+                  <div>
+                    <span className="eyebrow">我正在发现</span>
+                    <h3>从对话里慢慢看清的事情</h3>
+                  </div>
+                  <Sparkles size={19} />
+                </div>
+
+                {insightItems.length > 0 ? (
+                  <div className="plan-grid">
+                    {insightItems.map((item) => (
+                      <div key={item}>
+                        <dd>{item}</dd>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-copy">现在还不用急着下结论，先把你的真实体验聊清楚。</p>
+                )}
+              </section>
+
+              <section className="side-card plan-card">
+                <div className="card-title">
+                  <div>
+                    <span className="eyebrow">我的小实验</span>
+                    <h3>{actionPlan?.title ?? "还没有制定行动"}</h3>
+                  </div>
+                  {actionPlan ? <CheckCircle2 size={20} /> : <Gamepad2 size={20} />}
+                </div>
+
+                {actionPlan ? (
+                  <dl className="plan-grid">
+                    <div>
+                      <dt>我要尝试</dt>
+                      <dd>{actionPlan.behavior}</dd>
+                    </div>
+                    <div>
+                      <dt>持续时间</dt>
+                      <dd>{actionPlan.duration}</dd>
+                    </div>
+                    <div>
+                      <dt>我的原因</dt>
+                      <dd>{actionPlan.reason}</dd>
+                    </div>
+                    <div>
+                      <dt>当前状态</dt>
+                      <dd>{planStatusLabels[actionPlan.status]}</dd>
+                    </div>
+                    <div>
+                      <dt>复盘记录</dt>
+                      <dd>{actionPlan.successes} 次有效尝试 / {actionPlan.attempts} 次记录</dd>
+                    </div>
+                    {actionPlan.obstacle && (
+                      <div>
+                        <dt>可能的困难</dt>
+                        <dd>{actionPlan.obstacle}</dd>
+                      </div>
+                    )}
+                    {actionPlan.coping_plan && (
+                      <div>
+                        <dt>遇到困难时</dt>
+                        <dd>{actionPlan.coping_plan}</dd>
+                      </div>
+                    )}
+                    {actionPlan.last_review && (
+                      <div>
+                        <dt>最近一次复盘</dt>
+                        <dd>{actionPlan.last_review}</dd>
+                      </div>
+                    )}
+                  </dl>
+                ) : (
+                  <p className="empty-copy">
+                    当你自己提出一个想尝试的改变时，这里会把它整理成一个可观察的小实验。
+                  </p>
+                )}
+              </section>
+            </>
+          )}
         </aside>
       </main>
     </div>
