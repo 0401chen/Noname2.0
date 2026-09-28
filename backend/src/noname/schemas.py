@@ -63,6 +63,20 @@ class MotivationState(BaseModel):
     confidence: int | None = Field(default=None, ge=0, le=10)
 
 
+class SafetyConversationState(BaseModel):
+    active: bool = False
+    self_harm_thought: bool | None = None
+    immediate_plan: bool | None = None
+    currently_injuring: bool | None = None
+    current_safety: bool | None = None
+    alone: bool | None = None
+    trusted_person_present: bool | None = None
+    support_contacted: bool | None = None
+    means_removed: bool | None = None
+    user_refuses_support: bool | None = None
+    last_interpretation: str | None = None
+
+
 class ActionPlan(BaseModel):
     title: str
     behavior: str
@@ -131,6 +145,7 @@ class SessionState(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     analysis: ConversationAnalysis | None = None
     action_plan: ActionPlan | None = None
+    safety_state: SafetyConversationState = Field(default_factory=SafetyConversationState)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
