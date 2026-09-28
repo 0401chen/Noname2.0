@@ -69,6 +69,26 @@ CONCERN_RULES = (
 
 NEGATION_WINDOW = re.compile(r"(没有|不会|并不|不是).{0,4}(想死|自杀|伤害自己)")
 
+SAFETY_RESOLUTION_PATTERN = re.compile(
+    r"("
+    r"(我现在|我目前|我暂时).{0,4}安全.{0,12}(没有|不会|不打算).{0,8}(伤害自己|自杀|割腕)"
+    r"|"
+    r"(没有|不会|不打算).{0,8}(伤害自己|自杀|割腕).{0,12}(有人陪|身边有人|已经联系|已经告诉)"
+    r"|"
+    r"(已经联系|已经告诉).{0,10}(家人|父母|老师|成年人|朋友|辅导员).{0,10}(陪|过来|知道|在身边)"
+    r"|"
+    r"(家人|父母|老师|成年人|朋友|辅导员).{0,8}(在陪我|在我身边|已经来了)"
+    r")"
+)
+
+SAFETY_REFUSAL_PATTERN = re.compile(
+    r"(不想|不愿意|不敢|不能).{0,8}(告诉|联系|求助|找).{0,8}"
+    r"(别人|家人|父母|老师|成年人|任何人)"
+)
+
+SAFETY_ALONE_PATTERN = re.compile(r"(我现在)?(一个人|没人陪|独自|独处)")
+SAFETY_TEMP_SAFE_PATTERN = re.compile(r"(我现在|我目前|我暂时).{0,4}安全")
+
 
 def assess_rule_risk(text: str) -> RiskAssessment:
     """Conservative and auditable first-pass risk scan.
@@ -136,3 +156,74 @@ def safety_reply(risk: RiskAssessment) -> tuple[str, list[str]]:
         "例如家人、老师或学校心理老师，让现实中的人陪着你。"
     )
     return reply, ["我现在安全", "我有伤害自己的想法", "我可以联系一个成年人"]
+
+
+
+def safety_resolution_confirmed(text: str) -> bool:
+    """Return True only for an explicit, concrete de-escalation statement."""
+
+    normalized = " ".join(text.strip().split())
+    return bool(SAFETY_RESOLUTION_PATTERN.search(normalized))
+
+
+def carry_forward_safety_risk(previous: RiskAssessment) -> RiskAssessment:
+    """Keep a previously detected HIGH-risk session in safety mode.
+
+    A new turn should not fall back to ordinary conversation merely because the
+    user did not repeat the original self-harm or violence wording.
+    """
+
+    return RiskAssessment(
+        level=RiskLevel.HIGH,
+        signals=list(dict.fromkeys([*previous.signals, "safety_session_active"])),
+        immediate_danger=previous.immediate_danger,
+        source="session",
+    )
+
+
+def safety_followup_reply(
+    text: str,
+    risk: RiskAssessment,
+    *,
+    continuing: bool,
+) -> tuple[str, list[str]]:
+    """Safety reply that remains useful across multiple turns instead of repeating."""
+
+    normalized = " ".join(text.strip().split())
+
+    if continuing and SAFETY_REFUSAL_PATTERN.search(normalized):
+        reply = (
+            "我听到你现在不想告诉别人。你不需要一次把所有事情解释清楚，但因为你刚才提到过想伤害自己，"
+            "我不能把这当成普通聊天。先把可能伤害到你的东西放远，尽量去有其他人的地方。"
+            "你可以只对一个可信任的人说一句“我现在状态不太安全，能陪我一下吗？”。"
+            "你现在是一个人吗？"
+        )
+        return reply, ["我现在一个人", "身边有人", "我暂时安全"]
+
+    if continuing and SAFETY_ALONE_PATTERN.search(normalized):
+        reply = (
+            "谢谢你告诉我你现在是一个人。先把安全放在第一位：请离开可能伤害到你的东西或地方，"
+            "尽量去有其他人的公共空间，并马上联系一位可信任的成年人来陪你。"
+            "如果你已经准备伤害自己或觉得自己可能马上行动，请立即联系当地紧急救援服务。"
+        )
+        return reply, ["我可以去找人", "我已经联系了人", "我暂时安全"]
+
+    if continuing and SAFETY_TEMP_SAFE_PATTERN.search(normalized):
+        reply = (
+            "谢谢你告诉我你现在暂时安全。我们再确认一步：现在还有没有伤害自己的想法，"
+            "或者已经准备好要怎么做？如果还有，就继续让现实中的人陪着你，并把可能伤害到你的东西放远。"
+        )
+        return reply, ["没有伤害自己的想法", "还有这样的想法", "身边有人陪我"]
+
+    return safety_reply(risk)
+
+
+def safety_resolution_reply() -> tuple[str, list[str]]:
+    """Deterministic transition after the user clearly reports current safety."""
+
+    reply = (
+        "谢谢你把现在的安全情况说清楚。既然你明确说目前没有伤害自己的打算，"
+        "并且已经有人陪着或已经连接到现实中的支持，我们可以先把安全状态放稳。"
+        "如果危险感再次变强，请马上重新告诉身边的人或联系当地紧急救援。"
+    )
+    return reply, ["先休息一下", "继续聊刚才的事", "我想换个话题"]
