@@ -70,3 +70,55 @@ async def test_time_planning_intent_creates_small_experiment() -> None:
     assert response.action_plan.title == "时间安排小实验"
     assert "时间" in response.action_plan.behavior
     assert response.action_plan.status == "active"
+
+
+async def test_alarm_path_updates_experiment_card_from_real_demo_conversation() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-alarm-path"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我最近经常玩游戏到凌晨",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="感觉很兴奋，但是第二天很困",
+            reviewer_mode=True,
+        )
+    )
+
+    earlier = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="可以提早结束",
+            reviewer_mode=True,
+        )
+    )
+    assert earlier.action_plan is not None
+    assert earlier.action_plan.title == "早点结束小实验"
+
+    alarm = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="可以设置闹钟",
+            reviewer_mode=True,
+        )
+    )
+    assert alarm.action_plan is not None
+    assert alarm.action_plan.title == "早点下线小实验"
+    assert "闹钟" in alarm.action_plan.behavior
+
+    explicit = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我可以制定一个行动吗？",
+            reviewer_mode=True,
+        )
+    )
+    assert explicit.action_plan is not None
+    assert explicit.action_plan.title == "早点下线小实验"
+    assert "闹钟" in explicit.action_plan.behavior
