@@ -122,3 +122,95 @@ async def test_alarm_path_updates_experiment_card_from_real_demo_conversation() 
     assert explicit.action_plan is not None
     assert explicit.action_plan.title == "早点下线小实验"
     assert "闹钟" in explicit.action_plan.behavior
+
+
+async def test_high_risk_mode_persists_when_user_refuses_to_tell_someone() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-persistent-safety"
+
+    first = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我想割腕",
+            reviewer_mode=True,
+        )
+    )
+    second = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我不想告诉别人",
+            reviewer_mode=True,
+        )
+    )
+
+    assert first.trace is not None
+    assert second.trace is not None
+    assert first.trace.stage.value == "SAFETY"
+    assert first.trace.risk.level.value == "HIGH"
+    assert second.trace.stage.value == "SAFETY"
+    assert second.trace.risk.level.value == "HIGH"
+    assert "safety_session_active" in second.trace.risk.signals
+    assert "不想告诉别人" in second.reply
+    assert "安全" in second.reply
+
+
+async def test_high_risk_mode_blocks_normal_action_plan_creation() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-safety-block-plan"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我想割腕",
+            reviewer_mode=True,
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我想制定一个行动计划",
+            reviewer_mode=True,
+        )
+    )
+
+    assert response.trace is not None
+    assert response.trace.stage.value == "SAFETY"
+    assert response.trace.risk.level.value == "HIGH"
+    assert response.action_plan is None
+
+
+async def test_high_risk_mode_exits_only_after_explicit_safety_confirmation() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-safety-resolution"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我想割腕",
+            reviewer_mode=True,
+        )
+    )
+    still_active = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我现在暂时安全",
+            reviewer_mode=True,
+        )
+    )
+    resolved = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我现在安全，没有伤害自己的想法，家人在我身边陪我",
+            reviewer_mode=True,
+        )
+    )
+
+    assert still_active.trace is not None
+    assert still_active.trace.stage.value == "SAFETY"
+    assert still_active.trace.risk.level.value == "HIGH"
+
+    assert resolved.trace is not None
+    assert resolved.trace.stage.value != "SAFETY"
+    assert resolved.trace.risk.level.value != "HIGH"
+    assert "安全情况" in resolved.reply
+    assert "游戏" not in resolved.reply
