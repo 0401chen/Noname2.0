@@ -421,3 +421,58 @@ async def test_stream_endpoint_emits_ordered_ndjson_events(monkeypatch) -> None:
         event["text"] for event in events if event["type"] == "delta"
     )
     assert streamed_reply == events[-1]["data"]["reply"]
+
+
+
+async def test_repeated_game_value_exploration_bridges_back_to_original_sleep_concern() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-primary-focus-bridge"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="最近总是玩到很晚",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我就是喜欢玩",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="王者荣耀",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="朋友一起玩",
+            reviewer_mode=True,
+        )
+    )
+    bridged = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="我喜欢团队合作",
+            reviewer_mode=True,
+        )
+    )
+
+    state = service.sessions.get_or_create(session_id)
+    assert state.primary_focus_topic == "sleep"
+    assert state.primary_focus_excerpt == "最近总是玩到很晚"
+    assert state.last_anchor_bridge_user_turn == state.user_turn_count
+    assert bridged.trace is not None
+    assert bridged.trace.stage.value == "FOCUS"
+    assert bridged.trace.focus_topic == "sleep"
+    assert "朋友" in bridged.reply
+    assert "最开始" in bridged.reply
+    assert "最近总是玩到很晚" in bridged.reply
+    assert "特别的意义" not in bridged.reply
+    assert "最满足" not in bridged.reply
