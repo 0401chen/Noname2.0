@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -40,6 +41,21 @@ logger = logging.getLogger(__name__)
 
 LONG_MEMORY_KEEP_MESSAGES = 16
 LONG_MEMORY_COMPACT_AT = 28
+
+REDUCE_TIME_PATTERN = re.compile(
+    r"(?:每天|今晚|以后|这几天)?[^。！？]{0,8}(?:少玩|少打|减少)[^。！？]{0,8}"
+    r"(?:半个?小时|[0-9一二两三四五六七八九十两]+(?:个)?小时|[0-9一二两三四五六七八九十两]+分钟)"
+)
+TIME_LIMIT_PATTERN = re.compile(
+    r"(?:想试|试试|可以|打算|准备|想用|设|定)[^。！？]{0,10}(?:时间限制|时间上限|结束时间|下线时间)"
+)
+BETWEEN_ROUNDS_BREAK_PATTERN = re.compile(
+    r"(?:玩|打)?[^。！？]{0,4}(?:一局|一把)[^。！？]{0,10}(?:后|之后)[^。！？]{0,8}"
+    r"(?:休息|停一下|暂停|离开)[^。！？]{0,8}(?:分钟|一会儿|一会|一下)?"
+)
+BREAK_THEN_DECIDE_PATTERN = re.compile(
+    r"(?:休息|暂停|停一下)[^。！？]{0,10}(?:再|然后)[^。！？]{0,8}(?:考虑|决定)[^。！？]{0,6}(?:继续|还玩不玩|要不要继续)"
+)
 
 CRITICAL_QUALITY_FLAGS = {
     "diagnosis_or_label",
@@ -609,8 +625,15 @@ class ConversationService:
         message: str,
         analysis: ConversationAnalysis,
     ) -> ActionPlan | None:
-        plan_intent = any(
-            token in message
+        text = message.strip()
+        explicit_action_pattern = bool(
+            REDUCE_TIME_PATTERN.search(text)
+            or TIME_LIMIT_PATTERN.search(text)
+            or BETWEEN_ROUNDS_BREAK_PATTERN.search(text)
+            or BREAK_THEN_DECIDE_PATTERN.search(text)
+        )
+        plan_intent = explicit_action_pattern or any(
+            token in text
             for token in (
                 "可以试",
                 "我试试",
@@ -637,6 +660,10 @@ class ConversationService:
                 "安排时间",
                 "做个计划",
                 "定个计划",
+                "时间限制",
+                "时间上限",
+                "少玩半个小时",
+                "少玩半小时",
             )
         )
         if not plan_intent:
@@ -652,6 +679,76 @@ class ConversationService:
         )
         focus = analysis.focus_topic or state.analysis.focus_topic if state.analysis else analysis.focus_topic
         focus = focus or "general"
+
+        break_between_rounds = bool(
+            BETWEEN_ROUNDS_BREAK_PATTERN.search(text)
+            or BREAK_THEN_DECIDE_PATTERN.search(text)
+        )
+        reduce_time = REDUCE_TIME_PATTERN.search(text)
+
+        if break_between_rounds:
+            recent_reduce = REDUCE_TIME_PATTERN.search(recent_user_text)
+            if recent_reduce is not None:
+                return ActionPlan(
+                    title="游戏节奏小实验",
+                    behavior=(
+                        f"{recent_reduce.group(0).strip('，。！？ ')}；"
+                        "每局结束后先休息几分钟，再决定是否继续下一局"
+                    ),
+                    duration="先尝试一天，记录自己实际停下来的情况",
+                    reason=(
+                        "希望减少玩到太晚，同时保留自己决定是否继续的空间"
+                        if focus == "sleep"
+                        else "希望更容易在每局之间重新做一次选择"
+                    ),
+                    confidence=analysis.motivation.confidence or 6,
+                    obstacle="一局结束后马上又想点进下一局，忘了先停一下",
+                    coping_plan="把局间暂停当作观察点；一次没做到也只记录原因，下次再试",
+                )
+            return ActionPlan(
+                title="局间暂停小实验",
+                behavior="每局结束后先休息几分钟，再决定是否继续下一局",
+                duration="先尝试三次局间暂停，再看是否适合自己",
+                reason=(
+                    "希望避免一局接一局把时间拖得太晚"
+                    if focus == "sleep"
+                    else "希望在每局之间重新获得一次是否继续的选择"
+                ),
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="一局结束后顺手就进入下一局",
+                coping_plan="先离开匹配或准备界面，休息后再决定要不要继续",
+            )
+
+        if reduce_time is not None:
+            reduction = reduce_time.group(0).strip("，。！？ ")
+            return ActionPlan(
+                title="减少游戏时间小实验",
+                behavior=reduction,
+                duration="先连续尝试三天，再根据实际感受调整",
+                reason=(
+                    "希望减少游戏对睡眠和第二天状态的影响"
+                    if focus == "sleep"
+                    else "希望找到更适合自己的游戏时间边界"
+                ),
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="到了原本常玩的时间还是想继续",
+                coping_plan="提前想好今天准备在哪个时间点结束；没做到时只记录原因",
+            )
+
+        if TIME_LIMIT_PATTERN.search(text) or "时间限制" in text or "时间上限" in text:
+            return ActionPlan(
+                title="时间边界小实验",
+                behavior="开始游戏前先确定今天的结束时间，到点后不再开启新一局",
+                duration="先尝试三天，再根据实际情况调整",
+                reason=(
+                    "希望玩游戏的同时减少对睡眠的影响"
+                    if focus == "sleep"
+                    else "希望让游戏时间更可控"
+                ),
+                confidence=analysis.motivation.confidence or 6,
+                obstacle="到结束时间时正好还想继续或朋友还在线",
+                coping_plan="把结束时间当作最后一局边界；一次没做到也记录是什么让自己继续了",
+            )
 
         if any(token in recent_user_text for token in ("闹钟", "提醒")) and focus in {"sleep", "stopping"}:
             return ActionPlan(
