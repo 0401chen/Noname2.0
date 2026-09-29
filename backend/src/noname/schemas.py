@@ -145,6 +145,11 @@ class SessionState(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     conversation_summary: str = ""
     summary_compactions: int = Field(default=0, ge=0)
+    user_turn_count: int = Field(default=0, ge=0)
+    primary_focus_topic: FocusTopic | None = None
+    primary_focus_excerpt: str | None = None
+    primary_focus_last_seen_user_turn: int = Field(default=0, ge=0)
+    last_anchor_bridge_user_turn: int = Field(default=0, ge=0)
     analysis: ConversationAnalysis | None = None
     action_plan: ActionPlan | None = None
     safety_state: SafetyConversationState = Field(default_factory=SafetyConversationState)
