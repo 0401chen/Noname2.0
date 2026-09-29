@@ -660,10 +660,6 @@ class ConversationService:
                 "安排时间",
                 "做个计划",
                 "定个计划",
-                "时间限制",
-                "时间上限",
-                "少玩半个小时",
-                "少玩半小时",
             )
         )
         if not plan_intent:
