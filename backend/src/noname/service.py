@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 
 from .llm import GeneratedReply, LLMClient
-from .mi import heuristic_analysis
+from .mi import detect_focus_topic, heuristic_analysis
 from .quality import review_reply
 from .rag import KnowledgeStore
 from .safety import (
@@ -28,6 +28,7 @@ from .schemas import (
     ConversationAnalysis,
     ConversationStage,
     KnowledgeHit,
+    MIStrategy,
     ReviewerTrace,
     RiskLevel,
     SessionState,
@@ -70,6 +71,16 @@ class ConversationService:
     async def chat(self, request: ChatRequest) -> ChatResponse:
         started_at = perf_counter()
         state = self.sessions.get_or_create(request.session_id, request.age_group)
+        state.user_turn_count += 1
+
+        explicit_focus = detect_focus_topic(request.message)
+        if state.primary_focus_topic is None and explicit_focus is not None:
+            state.primary_focus_topic = explicit_focus
+            state.primary_focus_excerpt = request.message.strip()[:160]
+            state.primary_focus_last_seen_user_turn = state.user_turn_count
+        elif explicit_focus == state.primary_focus_topic:
+            state.primary_focus_last_seen_user_turn = state.user_turn_count
+
         current_rule_risk = assess_rule_risk(request.message)
         previous_safety = state.safety_state.active
 
@@ -155,6 +166,12 @@ class ConversationService:
                 analysis.next_goal = fallback_analysis.next_goal
 
         analysis.risk = merge_risk(rule_risk, semantic_analysis.risk if semantic_analysis else None)
+
+        if state.primary_focus_topic is None and analysis.focus_topic is not None:
+            state.primary_focus_topic = analysis.focus_topic
+            state.primary_focus_excerpt = request.message.strip()[:160]
+            state.primary_focus_last_seen_user_turn = state.user_turn_count
+
         if state.safety_state.active or analysis.risk.level is RiskLevel.HIGH:
             state.safety_state.active = True
             analysis.risk = carry_forward_safety_risk(analysis.risk)
@@ -166,6 +183,16 @@ class ConversationService:
             analysis.risk = current_rule_risk
             analysis.stage = ConversationStage.ENGAGE
             analysis.next_goal = "安全状态稳定后，由用户决定是否继续原话题"
+
+        if self._should_bridge_to_primary_focus(state, analysis):
+            analysis.stage = ConversationStage.FOCUS
+            analysis.focus_topic = state.primary_focus_topic
+            analysis.mi_strategies = [MIStrategy.SUMMARY, MIStrategy.OPEN_QUESTION]
+            analysis.next_goal = (
+                "先总结用户刚刚说清的游戏价值，再自然桥接回最初关注的问题；"
+                "不要继续追问同一正向体验的意义、满足感或更深层原因。"
+            )
+            state.last_anchor_bridge_user_turn = state.user_turn_count
 
         knowledge_hits: list[KnowledgeHit] = []
         if analysis.rag_required or analysis.risk.level is RiskLevel.HIGH:
@@ -297,6 +324,26 @@ class ConversationService:
             trace=trace,
         )
 
+    @staticmethod
+    def _should_bridge_to_primary_focus(
+        state: SessionState,
+        analysis: ConversationAnalysis,
+    ) -> bool:
+        if state.safety_state.active or state.primary_focus_topic is None:
+            return False
+        if analysis.stage in {
+            ConversationStage.PLAN,
+            ConversationStage.REVIEW,
+            ConversationStage.SAFETY,
+        }:
+            return False
+        if analysis.change_talk:
+            return False
+
+        turns_away = state.user_turn_count - state.primary_focus_last_seen_user_turn
+        turns_since_bridge = state.user_turn_count - state.last_anchor_bridge_user_turn
+        return turns_away >= 4 and turns_since_bridge >= 4
+
     async def _maybe_compact_long_memory(self, state: SessionState) -> bool:
         if state.safety_state.active:
             return False
@@ -349,7 +396,7 @@ class ConversationService:
             else "-"
         )
         logger.info(
-            "TURN_STATE session=%s stage=%s risk=%s focus=%s strategies=%s needs=%s "
+            "TURN_STATE session=%s stage=%s risk=%s focus=%s anchor=%s strategies=%s needs=%s "
             "importance=%s confidence=%s goal=%s rag=%s hits=%s fallback=%s plan=%s "
             "safety=%s summary_chars=%s compacted=%s recent_messages=%s quality=%s "
             "analysis_mode=%s completion_mode=%s ms=%.2f",
@@ -357,6 +404,7 @@ class ConversationService:
             analysis.stage.value,
             analysis.risk.level.value,
             analysis.focus_topic or "-",
+            state.primary_focus_topic or "-",
             strategies,
             needs,
             analysis.motivation.importance,
@@ -450,6 +498,32 @@ class ConversationService:
         stage = analysis.stage
         focus = analysis.focus_topic
         needs = {item.name for item in analysis.psychological_needs}
+
+        if state.last_anchor_bridge_user_turn == state.user_turn_count:
+            anchor = state.primary_focus_excerpt or {
+                "sleep": "最近游戏结束得比较晚",
+                "stopping": "想停却不容易停下来",
+                "school": "游戏正在影响学习状态",
+                "family": "游戏和家庭沟通之间有冲突",
+                "emotion": "游戏和情绪状态之间有关系",
+                "social": "游戏里的社交关系让你在意",
+            }.get(state.primary_focus_topic, "最开始提到的那件事")
+
+            value_text = (
+                "和朋友一起配合、一起玩的感觉对你很重要"
+                if needs & {"belonging", "connection"}
+                else "赢下来和获得成就感对你很重要"
+                if "achievement" in needs
+                else "游戏本身确实有你舍不得放下的部分"
+            )
+            return GeneratedReply(
+                reply=(
+                    f"这几轮你已经说得很清楚：{value_text}。"
+                    f"再放回你最开始提到的“{anchor}”，这两部分可能正好连在一起。"
+                    "我们先不继续往更深的“意义”里追问，看看它通常是在什么情况下把时间拖晚的。"
+                ),
+                quick_replies=["朋友还在线", "正打得顺", "输了想赢回来", "其实不是这个原因"],
+            )
 
         if stage is ConversationStage.ENGAGE:
             previous_assistant = next(
