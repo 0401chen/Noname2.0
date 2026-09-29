@@ -15,7 +15,7 @@ from .schemas import (
 
 
 NEED_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "belonging": ("队友", "朋友", "开黑", "一起玩", "群里", "没人陪", "战队", "同学"),
+    "belonging": ("队友", "朋友", "开黑", "一起玩", "团队合作", "配合", "一起赢", "群里", "没人陪", "战队", "同学"),
     "achievement": ("上分", "段位", "赢", "厉害", "擅长", "成就", "排名", "翻盘"),
     "autonomy": ("别管我", "凭什么", "控制我", "自己决定", "不理解我", "没收"),
     "relaxation": ("放松", "累", "压力", "烦", "缓一缓", "解压"),
@@ -32,6 +32,8 @@ FOCUS_KEYWORDS: dict[str, tuple[str, ...]] = {
         "没睡",
         "只睡",
         "晚睡",
+        "玩到很晚",
+        "很晚",
         "凌晨",
         "困",
         "起不来",
@@ -79,7 +81,7 @@ PLAN_PATTERN = re.compile(
 )
 
 
-def _first_matching_topic(text: str) -> str | None:
+def detect_focus_topic(text: str) -> str | None:
     scores = {
         topic: sum(1 for keyword in keywords if keyword in text)
         for topic, keywords in FOCUS_KEYWORDS.items()
@@ -172,7 +174,7 @@ def heuristic_analysis(
         )
 
     previous = state.analysis
-    focus_topic = _first_matching_topic(text) or (previous.focus_topic if previous else None)
+    focus_topic = detect_focus_topic(text) or (previous.focus_topic if previous else None)
     current_needs = _needs(text)
     psychological_needs = current_needs or (previous.psychological_needs if previous else [])
     current_emotions = [
