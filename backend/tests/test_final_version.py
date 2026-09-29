@@ -476,3 +476,83 @@ async def test_repeated_game_value_exploration_bridges_back_to_original_sleep_co
     assert "最近总是玩到很晚" in bridged.reply
     assert "特别的意义" not in bridged.reply
     assert "最满足" not in bridged.reply
+
+
+
+async def test_natural_time_reduction_phrase_creates_action_plan() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-natural-time-reduction"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="最近总是玩到很晚",
+            reviewer_mode=True,
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="每天少玩半个小时可以吗",
+            reviewer_mode=True,
+        )
+    )
+
+    assert response.action_plan is not None
+    assert response.action_plan.title == "减少游戏时间小实验"
+    assert "少玩半个小时" in response.action_plan.behavior
+    assert "三天" in response.action_plan.duration
+
+
+async def test_round_break_phrase_updates_action_plan_with_user_strategy() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-round-break-plan"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="最近总是玩到很晚",
+            reviewer_mode=True,
+        )
+    )
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="每天少玩半个小时可以吗",
+            reviewer_mode=True,
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="玩一局后休息几分钟，再考虑还继续玩",
+            reviewer_mode=True,
+        )
+    )
+
+    assert response.action_plan is not None
+    assert response.action_plan.title == "游戏节奏小实验"
+    assert "少玩半个小时" in response.action_plan.behavior
+    assert "每局结束后先休息几分钟" in response.action_plan.behavior
+
+
+async def test_asking_for_methods_alone_does_not_create_action_plan() -> None:
+    service = ConversationService(llm=DisabledLLM(), knowledge=KnowledgeStore())
+    session_id = "final-version-method-question-no-plan"
+
+    await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="最近总是玩到很晚",
+            reviewer_mode=True,
+        )
+    )
+    response = await service.chat(
+        ChatRequest(
+            session_id=session_id,
+            message="有没有具体一点的方法",
+            reviewer_mode=True,
+        )
+    )
+
+    assert response.action_plan is None
