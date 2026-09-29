@@ -184,7 +184,7 @@ class ConversationService:
             analysis.stage = ConversationStage.ENGAGE
             analysis.next_goal = "安全状态稳定后，由用户决定是否继续原话题"
 
-        if self._should_bridge_to_primary_focus(state, analysis):
+        if not safety_resolved_this_turn and self._should_bridge_to_primary_focus(state, analysis):
             analysis.stage = ConversationStage.FOCUS
             analysis.focus_topic = state.primary_focus_topic
             analysis.mi_strategies = [MIStrategy.SUMMARY, MIStrategy.OPEN_QUESTION]
