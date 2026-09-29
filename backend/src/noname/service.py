@@ -74,10 +74,22 @@ class ConversationService:
         state.user_turn_count += 1
 
         explicit_focus = detect_focus_topic(request.message)
+        stronger_concern = explicit_focus in {
+            "sleep",
+            "stopping",
+            "school",
+            "family",
+            "emotion",
+        }
         if state.primary_focus_topic is None and explicit_focus is not None:
             state.primary_focus_topic = explicit_focus
             state.primary_focus_excerpt = request.message.strip()[:160]
             state.primary_focus_last_seen_user_turn = state.user_turn_count
+        elif state.primary_focus_topic == "social" and stronger_concern:
+            state.primary_focus_topic = explicit_focus
+            state.primary_focus_excerpt = request.message.strip()[:160]
+            state.primary_focus_last_seen_user_turn = state.user_turn_count
+            state.last_anchor_bridge_user_turn = 0
         elif explicit_focus == state.primary_focus_topic:
             state.primary_focus_last_seen_user_turn = state.user_turn_count
 
