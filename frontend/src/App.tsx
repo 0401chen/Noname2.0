@@ -500,10 +500,6 @@ function App() {
                       <dt>当前状态</dt>
                       <dd>{planStatusLabels[actionPlan.status]}</dd>
                     </div>
-                    <div>
-                      <dt>复盘记录</dt>
-                      <dd>{actionPlan.successes} 次有效尝试 / {actionPlan.attempts} 次记录</dd>
-                    </div>
                     {actionPlan.obstacle && (
                       <div>
                         <dt>可能的困难</dt>
