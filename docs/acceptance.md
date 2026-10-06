@@ -119,19 +119,19 @@
 
 最终提交前建议重新确认：
 
-```bash
-cd backend
-pytest -q \
-  tests/test_final_version.py \
-  tests/test_service.py \
-  tests/test_safety.py \
+```powershell
+cd D:\Noname2.0\backend
+pytest -q `
+  tests/test_final_version.py `
+  tests/test_service.py `
+  tests/test_safety.py `
   tests/test_evaluation.py
 ```
 
 前端：
 
-```bash
-cd frontend
+```powershell
+cd D:\Noname2.0\frontend
 npm run build
 ```
 
