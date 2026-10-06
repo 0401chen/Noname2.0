@@ -1,101 +1,89 @@
-# Noname助手 Re:Play
+# Noname助手
 
 > 不是逼你离开游戏，而是帮你重新拿回选择权。
 
-面向青少年的游戏行为心理支持比赛原型，采用 **MI（动机式访谈）+ RAG + LLM** 构建可观察、可测试的单页对话系统。
+Noname助手是一个面向 12—18 岁青少年的游戏行为智能支持比赛原型。系统不以“戒游戏”或单纯限制时长为目标，而是通过动机式访谈（MI）风格的多轮会话，帮助用户理解游戏带来的价值与现实影响，在用户愿意改变时，把其自己的想法整理成足够小、可执行、可调整的微行动实验；当出现高风险表达时，系统会暂停普通游戏建议并切换到持续的安全优先模式。
 
-## 当前版本
+当前 `Final-version` 的核心能力包括：
 
-第五阶段 `0.5.0` 已包含：
+- MI 驱动的状态化多轮会话：`ENGAGE / FOCUS / EVOKE / PLAN / REVIEW / SAFETY`；
+- 当前话题 `focus` 与持久主线 `anchor` 分离，减少多轮对话跑偏；
+- 最近原始消息 + 滚动摘要 + 结构化状态组成长期会话记忆；
+- 本地 `BM25 + 中文字符 n-gram` 混合 RAG，并保留可追溯的检索分数和来源；
+- 基于用户行动意图的结构化微行动实验，而不是通用自主 Planner；
+- 规则风险检测 + LLM 上下文理解 + 持久 SafetyConversationState 的多层安全架构；
+- 生成后质量审核和确定性 fallback；
+- 先完成完整生成与安全审核、再向前端分段发送的应用层流式输出；
+- `TURN_STATE / SAFETY_STATE / LONG_MEMORY` 结构化开发日志；
+- 自动化测试、确定性场景评测和透明基线对比框架。
 
-- 单页面青少年对话和比赛演示场景；
-- ENGAGE、FOCUS、EVOKE、PLAN、REVIEW、SAFETY会话状态；
-- 规则风险扫描、模型语义分析和风险只升不降；
-- OpenAI兼容接口、JSON模式兼容降级和无Key离线回复；
-- 模型接口独立自检命令；
-- 0—10分改变意愿输入和短文本上下文继承；
-- BM25与中文字符n-gram混合检索；
-- 匿名SQLite会话、自动过期和一键清空；
-- 危险生成、欺骗建议、内部提示泄露和过长回复审核；
-- 六类微行动卡及完成、失败、暂停和复盘；
-- 60个确定性比赛场景和透明基线；
-- 评审面板中的运行诊断、评测证据和本轮决策轨迹；
-- Pytest、Ruff、前端构建、Docker Compose和GitHub Actions。
+## 1. 项目定位
 
-## 产品边界
+Noname助手的目标不是诊断“游戏成瘾”，也不是替家长或学校强制管理青少年，而是提供一个相对中立的支持空间，帮助用户回答三个问题：
 
-- 面向青少年本人，不建设家长端或教师端；
-- 提供风险识别、心理支持和行为改变辅助，不进行医学诊断；
-- 不以游戏时长作为唯一判断依据；
-- 不要求立即戒断，强调自主选择和微行动；
-- 高风险表达优先进入安全响应；
-- 比赛演示只使用虚构数据；
-- 不收集真实姓名、学校、住址、手机号或游戏账号；
-- 自动评测只衡量工程与对话规则，不代表临床疗效。
+1. 游戏对我为什么重要？
+2. 它最近有没有带来我不喜欢的影响？
+3. 如果我想改变，哪个最小步骤是我自己愿意尝试的？
 
-## Windows本地启动（推荐开发方式）
+系统同时设置独立安全层。当出现明确自伤、自杀、无法保证当前安全、暴力/虐待等高风险信息时，普通会话流程暂停，优先确认安全并鼓励连接现实中的可信任支持。
 
-### 1. 下载代码并准备配置
+## 2. 技术路线
 
-```powershell
-cd D:\
-git clone https://github.com/0401chen/Noname2.0.git
-cd D:\Noname2.0
-Copy-Item .env.example .env
-notepad .env
+```text
+用户输入
+   ↓
+规则风险扫描
+   ↓
+确定性会话初步分析
+   ↓
+LLM结构化会话分析
+   ↓
+MI阶段 + 当前focus + 主线anchor
+   ↓
+策略选择
+   ↓
+按需RAG / 长期会话记忆
+   ↓
+回复生成
+   ↓
+质量审核 / 安全校验
+   ↓
+微行动计划与会话状态更新
+   ↓
+应用层流式返回前端
 ```
 
-填写：
+高风险时，流程切换到独立的 SAFETY 状态机，不继续普通游戏建议。
 
-```env
-LLM_API_KEY=你的API密钥
-LLM_BASE_URL=https://api.vveai.com/v1
-LLM_MODEL=gpt-4o-mini
-VITE_AGENT_NAME=Noname助手
-```
+详细说明见：
 
-不要把`.env`、API Key或真实未成年人对话提交到GitHub。
+- `docs/product.md`
+- `docs/architecture.md`
+- `docs/safety.md`
+- `docs/evaluation.md`
+- `docs/acceptance.md`
 
-### 2. 创建Conda环境并安装后端
+## 3. 技术栈
 
-```powershell
-conda create -n noname2 python=3.11 -y
-conda activate noname2
-cd D:\Noname2.0
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-```
+### 前端
 
-### 3. 检查模型接口
+- React
+- TypeScript
+- Vite
+- Lucide React
 
-后端安装完成后运行：
+### 后端
 
-```powershell
-cd D:\Noname2.0\backend
-python -m noname.provider_check
-```
+- Python 3.11
+- FastAPI
+- Pydantic
+- OpenAI 兼容接口
+- 本地知识库
+- Pytest
 
-成功时会显示：
+## 4. 本地运行
 
-- 模型名称；
-- 接口主机名；
-- 使用`json-mode`还是兼容的`prompt-json`；
-- 单次测试耗时。
-
-该命令不会输出API Key。接口不支持`response_format`或`temperature`时，客户端会自动改用兼容调用方式。
-
-### 4. 安装Node.js和前端依赖
-
-```powershell
-conda activate noname2
-conda install -c conda-forge nodejs=22 -y
-cd D:\Noname2.0\frontend
-npm install
-```
-
-### 5. 启动后端
-
-第一个PowerShell终端：
+### 后端
 
 ```powershell
 conda activate noname2
@@ -103,16 +91,7 @@ cd D:\Noname2.0\backend
 uvicorn noname.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-检查：
-
-```text
-http://127.0.0.1:8000/api/health
-http://127.0.0.1:8000/docs
-```
-
-### 6. 启动前端
-
-第二个PowerShell终端：
+### 前端
 
 ```powershell
 conda activate noname2
@@ -120,134 +99,122 @@ cd D:\Noname2.0\frontend
 npm run dev
 ```
 
-访问：
+打开：
 
 ```text
 http://localhost:5173
 ```
 
-## 后续更新代码
+## 5. 会话模块
 
-停止前后端后，在项目根目录运行：
-
-```powershell
-cd D:\Noname2.0
-git pull
-```
-
-只有依赖文件发生变化时才需要重新执行：
-
-```powershell
-python -m pip install -r requirements-dev.txt
-cd frontend
-npm install
-```
-
-普通代码更新只需重新启动前端和后端。
-
-## Docker统一部署（最终阶段）
-
-Docker不是本地开发的必要条件。最终需要一键部署时：
-
-```powershell
-cd D:\Noname2.0
-docker compose up --build
-```
-
-访问：
+普通会话阶段：
 
 ```text
-http://localhost:8080
+ENGAGE  建立关系，理解游戏价值
+FOCUS   明确用户最想处理的问题
+EVOKE   引出用户自己的改变理由
+PLAN    形成微行动实验
+REVIEW  根据后续反馈复盘调整
 ```
 
-停止并保留匿名会话卷：
-
-```powershell
-docker compose down
-```
-
-停止并删除匿名会话卷：
-
-```powershell
-docker compose down -v
-```
-
-## 环境变量
-
-读取顺序：
+高风险阶段：
 
 ```text
-LLM_API_KEY → OPENAI_API_KEY → API_KEY
-LLM_BASE_URL → OPENAI_BASE_URL → API_BASE
-LLM_MODEL → OPENAI_MODEL → gpt-4o-mini
+SAFETY  暂停普通流程，优先处理当前安全
 ```
 
-默认匿名会话配置：
+系统不会只依赖当前一句话。`SessionState` 还保存：
 
-```env
-SESSION_STORAGE=sqlite
-SESSION_DATABASE_PATH=runtime/replay.sqlite3
-SESSION_MAX_MESSAGES=40
-SESSION_RETENTION_HOURS=24
-SESSION_CLEANUP_INTERVAL_SECONDS=300
+- `primary_focus_topic`
+- `primary_focus_excerpt`
+- `conversation_summary`
+- `action_plan`
+- `safety_state`
+
+因此可以在探索朋友、团队合作、成就感等支线时，仍保留用户最初提出的主线困扰。
+
+## 6. RAG
+
+当前知识检索采用本地透明混合方案：
+
+```text
+BM25
++
+中文字符 n-gram 相似度
++
+关键词加权
++
+类别加权
 ```
 
-完全无持久化演示：
+RAG 只在需要时触发。高风险状态下仅允许检索安全类别知识。
 
-```env
-SESSION_STORAGE=memory
+## 7. 微行动实验
+
+当用户明确表达愿意尝试，或直接提出可执行行为时，系统可以形成结构化 `ActionPlan`，例如：
+
+- 每天少玩一定时间；
+- 设置结束时间；
+- 提前结束；
+- 设置提醒；
+- 每局结束后先暂停几分钟再决定是否继续。
+
+计划可以包含：行为、持续时间、原因、障碍和应对方式。行为优先来自用户自己的表达；部分字段在信息不足时由系统根据当前会话辅助补全，因此该模块应准确描述为“用户意图驱动的结构化微行动规划”，而不是通用自主任务规划器。
+
+## 8. 安全
+
+安全层包含：
+
+1. 确定性规则风险扫描；
+2. LLM 安全上下文理解；
+3. 会话级持续 SafetyConversationState；
+4. 程序化安全退出条件；
+5. 安全回复生成与确定性兜底。
+
+模型不能降低规则层已识别的风险，也不能自行决定退出 SAFETY。
+
+## 9. 长期会话记忆
+
+系统使用：
+
+```text
+近期原始消息
++
+较早对话滚动摘要
++
+主线锚点 / 行动计划 / 安全状态等结构化状态
 ```
 
-## 比赛演示模式
+当前长对话达到压缩阈值后，会把较早消息摘要化并保留最近 16 条消息。
 
-页面提供五组虚构脚本：
+## 10. 流式输出
 
-1. 熬夜与队友关系；
-2. 最后一局循环；
-3. 学习压力与逃避循环；
-4. 父母控制与自主需要；
-5. 高风险安全路由。
+前端使用 `/api/chat/stream`。
 
-载入场景后会开启评审模式，但不会自动发送消息。演示者可逐句发送或修改文字。高风险脚本有单独视觉提示。
+当前实现不是未经审核的模型 token 直出，而是：
 
-## 后端接口
+```text
+完整生成
+→ 风险与质量审核
+→ start
+→ meta
+→ delta...
+→ done
+```
 
-| 接口 | 作用 |
-|---|---|
-| `GET /api/health` | 最小健康检查 |
-| `GET /api/diagnostics` | 不包含密钥的运行诊断 |
-| `GET /api/demo/scenarios` | 获取虚构演示脚本 |
-| `GET /api/evaluation/summary` | 获取评测和基线摘要 |
-| `POST /api/chat` | 进行会话 |
-| `DELETE /api/sessions/{session_id}` | 删除匿名会话 |
+这样优先保证安全和最终回复一致性。
 
-## 测试与评测
+## 11. 测试与评测
 
-后端测试：
+核心测试：
 
 ```powershell
 cd D:\Noname2.0\backend
-ruff check .
-pytest -q
-```
-
-60个确定性场景：
-
-```powershell
-python -m noname.evaluation
-```
-
-透明基线：
-
-```powershell
-python -m noname.benchmark
-```
-
-在线模型评测：
-
-```powershell
-python -m noname.evaluation --online
-python -m noname.benchmark --online-full --online-baseline
+pytest -q `
+  tests/test_final_version.py `
+  tests/test_service.py `
+  tests/test_safety.py `
+  tests/test_evaluation.py
 ```
 
 前端生产构建：
@@ -257,18 +224,29 @@ cd D:\Noname2.0\frontend
 npm run build
 ```
 
-在线结果受模型版本、供应商、网络和采样随机性影响，不能替代人工安全复核。
+确定性场景评测：
 
-## 推荐答辩演示
+```bash
+cd backend
+python -m noname.evaluation
+```
 
-1. 先运行模型接口自检、60场景和透明基线；
-2. 启动前后端并选择“熬夜与队友关系”；
-3. 依次发送虚构脚本，展示睡眠关注、归属需要和MI策略；
-4. 形成三天行动卡并发送一次复盘表达；
-5. 重置后载入“高风险安全路由”；
-6. 展示普通游戏建议停止、会话进入SAFETY；
-7. 在评审面板展示运行诊断、RAG证据、评测和基线差异。
+透明基线：
 
-## 安全说明
+```bash
+python -m noname.benchmark
+```
 
-本项目不能替代心理咨询、医疗诊断或紧急救援。不要提交真实未成年人对话、姓名、学校、地址、账号或其他敏感信息，也不要将任何API密钥提交到GitHub。
+测试和场景结果验证的是工程流程与预设对话行为，不应解释为临床疗效。
+
+## 12. 当前边界
+
+当前项目是比赛原型，不宣称：
+
+- 能够医学诊断游戏障碍；
+- 能够替代心理治疗或现实危机支持；
+- 已经证明能降低青少年游戏问题发生率；
+- 已完成大规模真实未成年人研究；
+- 具备通用复杂任务自主规划能力。
+
+后续若进入真实用户研究，应进一步完成伦理审查、未成年人数据治理、安全误报/漏报评估和人工效果评测。
